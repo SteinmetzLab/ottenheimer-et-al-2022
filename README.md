@@ -1,4 +1,4 @@
 # ottenheimer-et-al-2022
 Code and pointers to data associated with Ottenheimer, Hjort, Bowen, et al. 2022.
 
-Code and data will be made available soon! Please check back later. 
+All code from preprint is uploaded. Data files will be uploaded separately.

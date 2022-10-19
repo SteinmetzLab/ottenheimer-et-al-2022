@@ -155,6 +155,7 @@ for session=1:length(sessions)
 end
 
 figure;
+subplot(1,4,1);
 for session=1:length(sessions)
     hold on;
     errorbar([1 2],mean(anticipatoryLicks{1,1}),nanste(anticipatoryLicks{1,1},1),'linewidth',1.5,'color',[0.1 0.6 0.2]);
@@ -171,7 +172,21 @@ for session=1:length(sessions)
     xlim([0.75 2.25]);
 end
 
+subplot(1,2,2)
+hold on
+for subject=1:length(anticipatoryLicks{1})
+    scatter(mean(anticipatoryLicks{2}(subject,:)),mean(anticipatoryLicks{1}(subject,:)),18,'filled');
+end
 
+plot([-2 10],[-2 10],':','color','k','linewidth',1);
+axis([-2 10 -2 10])
+xticks([0 5 10]);
+yticks([0 5 10]);
+text(5,1,sprintf('combined'));
+
+data=[mean(anticipatoryLicks{2}(:,:),2);mean(anticipatoryLicks{1}(:,:),2)];
+[~,p,~,stats]=ttest(mean(anticipatoryLicks{2}(:,:),2),mean(anticipatoryLicks{1}(:,:),2));
+text(5,0,sprintf('p = %g',round(p(1),2,'significant')));
 %% count neurons
 totalNeurons=0;
  
@@ -345,6 +360,7 @@ for session=1:length(sessions)
 %             medianF=medfilt1(double(correctedF),7);
             
             decSpks=spks(roiNum,firstFrame(mouse,session):lastFrame(mouse,session));
+            %decSpks=smooth(decSpks,5)'; %to account for error in estimating deconvolved spike frame
             
             %smooth with the same filter used for ephys
             spikeRateSmooth=NaN(1,length(decSpks));
@@ -779,7 +795,265 @@ gl=cat(1,ones(5,2),2*ones(5,2),3*ones(5,2));
 
 end
 
+%% PCA
+figure;
 
+plotWindow=[-0.5 6];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+sel=true(totalNeurons,1);
+activity=[];
+for cue=1:3
+    for os=1:2   
+        activity = [activity dffPSTH3{cue,os}(sel,plotBins)];
+    end
+end
+activity=activity./max(abs(activity),[],2);
+[coeff,score,~,~,explained]=pca(activity');
+specs={'-','--'};
+for comp=1:5
+    cond=0;
+    if explained(comp)>5
+    subplot(2,2,comp)
+    
+    hold on
+    for cue=1:3
+        for os=1:2
+            cond=cond+1;
+            plot(binTimes(plotBins),-score((cond-1)*sum(plotBins)+1:cond*sum(plotBins),comp),specs{os},'color',colors{cue},'linewidth',1);
+        end
+    end
+    ylabel(sprintf('#%g (%g%%)',comp,round(explained(comp),1)));
+    yticks([]);
+    if comp==1 xticks([0 2 4 6]); end
+    if comp>1 xticks([]); end
+    
+%     plot([0 0],[min(score(:,comp)) max(score(:,comp))],':','color','k','linewidth',0.5);
+%     plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+    xlim(plotWindow);
+    
+    patch([0 0 stimDuration stimDuration],[-1 1 1 -1],[0.6 0.3 0],'edgecolor','none');alpha(0.3);
+    plot([rewOnset rewOnset],[-1 1],'color',[0 0.6 0.3]);    
+    end
+
+end
+
+
+
+%% coding dimension for CS+/CS50/CS-
+figure;
+%categories for subselection
+sels={};
+sels{1}=category{1}==1;
+sels{2}=category{1}==3;
+
+numstraps=5000;
+amin=-0.25;
+amax=1.75;
+cueWindow=[0 2.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+
+plotWindow=[-1 10];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+plotBinTimes=binTimes(plotBins);
+baseBins=plotBinTimes<0;
+
+%normalize activity from 0-1
+dffPSTH6n={};
+dffPSTH3n={};
+for session=1:2
+    dffPSTH6all=[];
+    for condition=1:6
+        dffPSTH6all=cat(2,dffPSTH6all,dffPSTH6{condition,session});
+    end
+    for condition=1:6
+       dffPSTH6n{condition,session}=dffPSTH6{condition,session}./max(abs(dffPSTH6all),[],2); 
+    end
+    
+    dffPSTH3all=[];
+    for condition=1:3
+        dffPSTH3all=cat(2,dffPSTH3all,dffPSTH3{condition,session});
+    end
+    for condition=1:3
+       dffPSTH3n{condition,session}=dffPSTH3{condition,session}./max(abs(dffPSTH3all),[],2); 
+    end
+end
+
+
+%get activity for dimensions
+csmActivity=dffPSTH6n{5,1}(:,cueBins);
+cspActivity=dffPSTH6n{1,1}(:,cueBins);
+csfActivity=dffPSTH6n{3,1}(:,cueBins);
+
+bigBinSize=5;
+bigBins=floor(sum(cueBins)/bigBinSize);
+bsf=0;
+for bb=1:bigBins
+    csmActivityB(:,bb)=mean(csmActivity(:,bsf+1:bsf+bigBinSize),2);
+    cspActivityB(:,bb)=mean(cspActivity(:,bsf+1:bsf+bigBinSize),2);
+    csfActivityB(:,bb)=mean(csfActivity(:,bsf+1:bsf+bigBinSize),2);
+    
+    bsf=bsf+bigBinSize;
+end
+
+%normalize activity from -1 to 1
+[~,PMind]=max(abs(cspActivityB-csmActivityB),[],2,'linear');
+[~,PFind]=max(abs(cspActivityB-csfActivityB),[],2,'linear');
+[~,FMind]=max(abs(csfActivityB-csmActivityB),[],2,'linear');
+
+differenceVectorPM=cspActivityB(PMind)-csmActivityB(PMind);
+differenceVectorPF=cspActivityB(PFind)-csfActivityB(PFind);
+differenceVectorFM=csfActivityB(FMind)-csmActivityB(FMind);
+
+
+sproj={};
+oproj={};
+disttime={};
+
+%for getting 0 and 1, use z-score
+csmActivity=dffPSTH6{5,1}(:,cueBins);
+cspActivity=dffPSTH6{1,1}(:,cueBins);
+csfActivity=dffPSTH6{3,1}(:,cueBins);
+
+bsf=0;
+for bb=1:bigBins
+    csmActivityB(:,bb)=mean(csmActivity(:,bsf+1:bsf+bigBinSize),2);
+    cspActivityB(:,bb)=mean(cspActivity(:,bsf+1:bsf+bigBinSize),2);
+    csfActivityB(:,bb)=mean(csfActivity(:,bsf+1:bsf+bigBinSize),2);
+    
+    bsf=bsf+bigBinSize;
+end
+
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+
+projCorrStrp=NaN(numstraps,length(sels));
+baseCSMdist=NaN(numstraps,length(sels));
+cspfangle=NaN(numstraps,length(sels));
+for cl=1:length(sels)
+    sel=sels{cl};
+    
+    PF1=differenceVectorPF(sel)' * cspActivityB(PFind(sel));
+    PF0=differenceVectorPF(sel)' * csfActivityB(PFind(sel));
+    PM1=differenceVectorPM(sel)' * cspActivityB(PMind(sel));
+    PM0=differenceVectorPM(sel)' * csmActivityB(PMind(sel));
+    FM1=differenceVectorFM(sel)' * csfActivityB(FMind(sel));
+    FM0=differenceVectorFM(sel)' * csmActivityB(FMind(sel));
+
+    for cue=1:3
+        sproj{cue,1}=(differenceVectorPM(sel)' * dffPSTH6{(cue-1)*2+2,1}(sel,:) - PM0) ./ (PM1 - PM0);
+        sproj{cue,2}=(differenceVectorPF(sel)' * dffPSTH6{(cue-1)*2+2,1}(sel,:) - PF0) ./ (PF1 - PF0);
+        sproj{cue,3}=(differenceVectorFM(sel)' * dffPSTH6{(cue-1)*2+2,1}(sel,:) - FM0) ./ (FM1 - FM0);
+        
+        oproj{cue,1}=(differenceVectorPM(sel)' * dffPSTH3{cue,2}(sel,:) - PM0) ./ (PM1 - PM0);
+        oproj{cue,2}=(differenceVectorPF(sel)' * dffPSTH3{cue,2}(sel,:) - PF0) ./ (PF1 - PF0);
+        oproj{cue,3}=(differenceVectorFM(sel)' * dffPSTH3{cue,2}(sel,:) - FM0) ./ (FM1 - FM0);
+    end
+    
+    subplot(3,4,1+(cl-1)*4);
+    hold on;
+    for cue=1:3
+        plot(sproj{cue,1}(plotBins),sproj{cue,3}(plotBins),':','linewidth',1,'color',colors{cue});
+        plot(sproj{cue,1}(cueBins),sproj{cue,3}(cueBins),'linewidth',1,'color',colors{cue});
+
+    end
+    %view(45,0);
+    axis([amin amax amin amax amin amax]);
+    if cl==1
+        title('same odor set');
+            xlabel('CS- ---> CS+');
+        ylabel('CS- ---> CS50');
+    end
+    xticks([0 1]);
+    yticks([0 1]);
+    
+    subplot(3,4,2+(cl-1)*4);
+    hold on;
+    for cue=1:3
+        plot(oproj{cue,1}(plotBins),oproj{cue,3}(plotBins),':','linewidth',1,'color',colors{cue});
+        plot(oproj{cue,1}(cueBins),oproj{cue,3}(cueBins),'linewidth',1,'color',colors{cue});
+    
+    end
+    axis([amin amax amin amax amin amax]);
+    xticks([]);
+    yticks([]);
+    if cl==1 title('other odor set'); end     
+     
+     
+     %bootstrap a statistic
+     incNeur=find(sel);
+
+     for strap=1:numstraps
+         ns=incNeur(randsample(length(incNeur),length(incNeur),'true'));
+         PF1=differenceVectorPF(ns)' * cspActivityB(PFind(ns));
+         PF0=differenceVectorPF(ns)' * csfActivityB(PFind(ns));
+         PM1=differenceVectorPM(ns)' * cspActivityB(PMind(ns));
+         PM0=differenceVectorPM(ns)' * csmActivityB(PMind(ns));
+         FM1=differenceVectorFM(ns)' * csfActivityB(FMind(ns));
+         FM0=differenceVectorFM(ns)' * csmActivityB(FMind(ns));
+         
+         for cue=1:3
+             sproj{cue,1}=(differenceVectorPM(ns)' * dffPSTH6{(cue-1)*2+2,1}(ns,cueBins) - PM0) ./ (PM1 - PM0);
+             sproj{cue,2}=(differenceVectorPF(ns)' * dffPSTH6{(cue-1)*2+2,1}(ns,cueBins) - PF0) ./ (PF1 - PF0);
+             sproj{cue,3}=(differenceVectorFM(ns)' * dffPSTH6{(cue-1)*2+2,1}(ns,cueBins) - FM0) ./ (FM1 - FM0);
+             
+             oproj{cue,1}=(differenceVectorPM(ns)' * dffPSTH3{cue,2}(ns,cueBins) - PM0) ./ (PM1 - PM0);
+             oproj{cue,2}=(differenceVectorPF(ns)' * dffPSTH3{cue,2}(ns,cueBins) - PF0) ./ (PF1 - PF0);
+             oproj{cue,3}=(differenceVectorFM(ns)' * dffPSTH3{cue,2}(ns,cueBins) - FM0) ./ (FM1 - FM0);
+         end
+     
+         %only use CS- subtracted axes for correlation
+         sprojall=cat(1,sproj{:,[1 3]});
+         oprojall=cat(1,oproj{:,[1 3]});
+         projCorrStrp(strap,cl)=corr(sprojall(:),oprojall(:));
+         
+         %baseline distance from CS-
+         basex=mean([sproj{1,1}(baseBins) sproj{2,1}(baseBins) sproj{3,1}(baseBins)]);
+         basey=mean([sproj{1,3}(baseBins) sproj{2,3}(baseBins) sproj{3,3}(baseBins)]);
+         baseCSMdist(strap,cl)=sqrt(basex^2+basey^2);
+         
+         %angle between CS+ at peak along (CS-/CS+) and CS50 at peak along (CS-/CS50)
+         [cspx,bin]=max(sproj{1,1}); %CSP
+         cspy=sproj{1,3}(bin);        
+         [csfy,bin]=max(sproj{2,3}); %CSF
+         csfx=sproj{2,1}(bin);        
+         v_1 = [cspx,cspy,0] - [basex,basey,0];
+         v_2 = [csfx,csfy,0] - [basex,basey,0];
+         cspfangle(strap,cl) = atan2(norm(cross(v_1, v_2)), dot(v_1, v_2)) * 180/pi; %angle
+         
+     end
+     
+
+     
+
+end
+
+subplot(3,5,4);
+hold on;
+for c=1:2
+histogram(cspfangle(:,c),-10:1:90,'facecolor',catcolors{c},'edgecolor',catcolors{c},'orientation','horizontal','normalization','probability');
+end
+ylabel('CS+, CS50 angle');
+xlabel('frequency');
+bootp=(sum(sum(cspfangle(:,1)<=cspfangle(:,2)'))+1)/(numstraps^2+1);
+text(0.01,50,sprintf('p = %g',round(bootp,2,'significant')));
+ylim([-10 90]);
+yticks([0 45 90]);
+plot([0 0.1],[0 0],':','color','k','linewidth',0.5);
+xticks([0 0.1]);
+
+subplot(3,5,5);
+hold on;
+for c=1:2
+histogram(projCorrStrp(:,c),0.5:0.01:1,'facecolor',catcolors{c},'edgecolor',catcolors{c},'orientation','horizontal','normalization','probability');
+end
+ylabel('same/other correlation');
+bootp=(sum(sum(projCorrStrp(:,1)>=projCorrStrp(:,2)'))+1)/(numstraps^2+1);
+text(0.1,0.7,sprintf('p = %g',round(bootp,2,'significant')));
+ylim([0.5 1]);
+yticks([0.5 1]);
+xticks([0 0.4]);
+xlim([0 0.4]);
 
 %% remove doubles (from merging) and edge of FOV rois
 function iscell = processROIs(iscell,stat,F)

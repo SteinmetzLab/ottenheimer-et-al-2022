@@ -4,7 +4,6 @@ addpath(genpath(fullfile(githubDir, 'npy-matlab'))) %to load .npy files
 addpath(genpath(fullfile(githubDir, 'steinmetz-et-al-2019'))) %for reduced rank
 direc = 'D:\GitHub\ottenheimer-et-al-2022\Neuropixels'; %where neuropixels data exists
 addpath(direc);
-
 %% find all sessions
 
 subjectFolders = dir(direc);
@@ -1000,7 +999,7 @@ glmFile='valueGLM20220611';
 tic
 
 
-%permute all possible combinations of odors for meaning shuffle
+%permute all possible combinations of odors for value shuffle
 allodors=1:6;
 perms6=NaN(90,6);
 first2=nchoosek(allodors,2);
@@ -1153,7 +1152,12 @@ for session=1:sum(includedSessions)
                 
                 rA3 = A3Sh{perm} * bR3(:,1:components);
                 trains = getfolds(rA3,folds,binsPerTrial);
-
+                
+                %         if ismember(perm,topModels)
+                %            display(perms6all(perm,:));display([combinedValues(1:10) newValue(1:10)]);
+                %         end
+                
+                
                 pred=NaN(size(y,1),1);
                 for fold=1:folds
                     train=trains{fold};
@@ -1180,7 +1184,8 @@ save('newGLMFile.mat','varExp','varExpValueSh','kernels','lambdaVal','predF','-v
 end
 toc
 
-%% value coding analysis 90
+
+%% value coding analysis 90 with untuned
 improvCutoff=0.02;
 overallCutoff=0.02;
 improvement=varExp(:,1)-varExp;
@@ -1199,7 +1204,7 @@ end
 
 %value specific variance
 %whatever is accounted for by value kernel
-cueVariance=totalCueVariance - valueImp(:,[4:end-1]);
+cueVariance=totalCueVariance - valueImp(:,[4:end]);
 [~,bestModel]=max(cueVariance,[],2);
 bestModel(isnan(cueVariance(:,1)))=NaN;
 %region
@@ -1217,44 +1222,71 @@ vcolors={[0 0.7 1],[0.6 0.6 0.6]};
 figure;
 
 cueNames={'+','+','50','50','-','-'};
+odorValues=[0.5 0.5 0.37 0.37 0.05 0.05];
 vnames={};
+shuffVals=NaN(90,6);
 for n=1:length(perms6all)
     vnames{n,1}=append(cueNames{perms6all(n,:)==1},'/',cueNames{perms6all(n,:)==2},', ',cueNames{perms6all(n,:)==3},'/',cueNames{perms6all(n,:)==4},', ',cueNames{perms6all(n,:)==5},'/',cueNames{perms6all(n,:)==6});
+    for odor=1:6
+        shuffVals(n,odor)=odorValues(perms6all(n,:)==odor);
+    end
 end
 
 subplot(3,1,1);
 hold on
-frequency=histcounts(bestModel(cueK&~behavior&~isnan(bestModel)),0.5:1:90.5,'normalization','probability');
-outliers=frequency>0.03;
+frequency=histcounts(bestModel(cueK&~behavior&~isnan(bestModel)),0.5:1:91.5,'normalization','probability');
+outliers=frequency>0.017;
 topModels=find(outliers);
-b=bar(1:max(bestModel),frequency,'facecolor',[0.6 0.6 0.6],'linewidth',0.01);
+b=bar([1:max(bestModel)-1 max(bestModel)+1],frequency,'facecolor',[0 0.2 0.4],'linewidth',0.01);
 b.FaceColor='flat';
 for e=1:length(topModels)
-b.CData(topModels(e),:)=[0.7 0 1]; %meaning
+b.CData(topModels(e),:)=[0.7 0 1]; %trial type
 end
 b.CData(1,:)=[0 0.7 1]; %value
+b.CData(end,:)=[0.6 0.6 0.6]; %non-specific
 
 
 
 ylabel('fraction of cue cells');
 
-chance=1/90;
+chance=1/90 * sum(bestModel(cueK&~behavior&~isnan(bestModel))<91)/sum(cueK&~behavior&~isnan(bestModel));
 plot([0 91],[chance chance],':','color','k','linewidth',0.5);
-xlim([0 91]);
-ylim([0 0.375]);
-xticks(topModels);
+xlim([0 93]);
+ylim([0 0.35]);
+xticks(topModels(1:end-1));
 yticks(0:0.1:0.3);
 %xtickangle(45);
 %xticklabels(vnames(outliers));
 
-category=8*ones(length(improvement),1);
-category(cueK&~behavior)=7; %cue neurons
+category=9*ones(length(improvement),1);
+category(cueK&~behavior)=8; %cue neurons
 %categorize neurons by their best model if it's in the top models
 for bm=1:length(topModels)
 category(cueK&~behavior&bestModel==topModels(bm))=bm; %cue, odor
 end
 
-%% get proportions of value and meaning and compare between regions
+% visual depiction of shuffles
+colormap('summer');
+subplot(5,1,3);
+imagesc(1:45,1:6,shuffVals(1:45,:)',[0 0.5]);
+xticks(topModels);
+yticks(1:6);
+yticklabels({'CS+','CS+','CS50','CS50','CS-','CS-'});
+title('Value assigned to each odor in each shuffle');
+
+subplot(5,1,4);
+imagesc(46:90,1:6,shuffVals(46:end,:)',[0 0.5]);
+xticks(topModels);
+yticks(1:6);
+yticklabels({'CS+','CS+','CS50','CS50','CS-','CS-'});
+
+
+subplot(5,2,9);
+imagesc(1:45,1:6,shuffVals(1:45,:)',[0 0.5]);
+xticks(topModels);
+colorbar;
+
+%% get proportions of value and trial type and compare between regions
 regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
 reggrps=[1:3];
 
@@ -1268,16 +1300,16 @@ for reg=1:length(regions)
 end
 
 %fit all together, allowing random effect of session to have more power
-catcolors={[0 0.7 1],[0.7 0 1],[0.6 0.6 0.6]};
-titles={'value','meaning (non-value)','non-meaning'};
-cats={1,2:6,7};
-for ct=1:3
+catcolors={[0 0.7 1],[0.7 0 1],[0.6 0.6 0.6],[0.05 0.25 0.45]};
+titles={'value','trial type','non-specific','other selective'};
+cats={1,2:6,7,8};
+for ct=1:4
     %region
     barData=zeros(2,5);
-    subplot(4,3,ct);
+    subplot(4,4,ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;
+    othersel=ismember(category,1:8)&~sel;
     regionnumber=zeros(totalNeurons,1);
     for reg=1:length(allReg)
         regsel=ismember(neuronRegionOlf,allReg(reg));
@@ -1291,12 +1323,8 @@ for ct=1:3
     
     barData=barData(:,regInd);
     b=bar(barData','stacked');
-    %b(3).FaceColor=[0.4 0 0.5]; %odor
-    b(2).FaceColor=[0.85 0.85 0.85]; %meaning
-    b(1).FaceColor=catcolors{ct}; %value
-    %b(4).FaceColor=[0 0 0.2]; %odor
-    % b(5).FaceColor=[0.9 0.2 0];
-    %b(3).FaceColor=[1 1 1];
+    b(2).FaceColor=[0.85 0.85 0.85];
+    b(1).FaceColor=catcolors{ct};
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -1334,7 +1362,7 @@ for ct=1:3
             greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
-    s=subplot(4,3,3+ct);
+    s=subplot(4,4,4+ct);
     imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
@@ -1353,10 +1381,10 @@ for ct=1:3
     
     %region group
     barData=zeros(2,3);
-    subplot(4,3,6+ct);
+    subplot(4,4,8+ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;    
+    othersel=ismember(category,1:8)&~sel;    
     regionnumber=zeros(totalNeurons,1);
     for reg=1:4
         regsel=ismember(neuronGroup,reg);
@@ -1370,12 +1398,8 @@ for ct=1:3
 
     barData=barData(:,reggrps);    
     b=bar(barData','stacked');
-    %b(3).FaceColor=[0.4 0 0.5]; %odor
     b(2).FaceColor=[0.85 0.85 0.85];
-    b(1).FaceColor=catcolors{ct}; %value
-    %b(4).FaceColor=[0 0 0.2]; %odor
-    % b(5).FaceColor=[0.9 0.2 0];
-    %b(3).FaceColor=[1 1 1];
+    b(1).FaceColor=catcolors{ct};
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -1413,7 +1437,7 @@ for ct=1:3
             greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
-    s=subplot(4,3,9+ct);
+    s=subplot(4,4,12+ct);
     imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
@@ -1433,7 +1457,7 @@ for ct=1:3
 end
 
 
-%% get proportions of value and meaning out of cue cells
+%% get proportions of value and trial type out of cue cells
 regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
 reggrps=[1:3];
 
@@ -1447,19 +1471,19 @@ for reg=1:length(regions)
 end
 
 %fit all together, allowing random effect of session to have more power
-catcolors={[0 0.7 1],[0.7 0 1],[0.6 0.6 0.6]};
-titles={'value','meaning (non-value)','non-meaning'};
-cats={1,2:6,7};
-for ct=1:3
+catcolors={[0 0.7 1],[0.7 0 1],[0.6 0.6 0.6],[0.05 0.25 0.45]};
+titles={'value','trial type','untuned','other selective'};
+cats={1,2:6,7,8};
+for ct=1:4
     %region
     barData=zeros(2,5);
-    subplot(4,3,ct);
+    subplot(4,4,ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;
+    othersel=ismember(category,1:8)&~sel;
     regionnumber=zeros(totalNeurons,1);
     for reg=1:length(allReg)
-        regsel=ismember(neuronRegionOlf,allReg(reg))&category<8;
+        regsel=ismember(neuronRegionOlf,allReg(reg))&category<9;
         regionnumber(regsel)=reg;
         barData(1,reg)=sum(sel&regsel)/sum(regsel);
         barData(2,reg)=sum(othersel&regsel)/sum(regsel);   
@@ -1470,13 +1494,13 @@ for ct=1:3
     
     barData=barData(:,regInd);
     b=bar(barData','stacked');
-    b(2).FaceColor=[0.85 0.85 0.85]; %meaning
-    b(1).FaceColor=catcolors{ct}; %value
+    b(2).FaceColor=[0.85 0.85 0.85];
+    b(1).FaceColor=catcolors{ct};
     upperCI=[];
     lowerCI=[];
     estmean=[];
     for reg=1:length(regions)
-        regsel=find(ismember(neuronRegionOlf(category<8),regions(reg)),1);
+        regsel=find(ismember(neuronRegionOlf(category<9),regions(reg)),1);
         estmean(1,reg)=ypred(regsel);
         upperCI(1,reg)=ypredCI(regsel,2);
         lowerCI(1,reg)=ypredCI(regsel,1);
@@ -1509,7 +1533,7 @@ for ct=1:3
             greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
-    s=subplot(4,3,3+ct);
+    s=subplot(4,4,4+ct);
     imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
@@ -1528,13 +1552,13 @@ for ct=1:3
     
     %region group
     barData=zeros(2,3);
-    subplot(4,3,6+ct);
+    subplot(4,4,8+ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;    
+    othersel=ismember(category,1:8)&~sel;    
     regionnumber=zeros(totalNeurons,1);
     for reg=1:4
-        regsel=ismember(neuronGroup,reg)&category<8;
+        regsel=ismember(neuronGroup,reg)&category<9;
         regionnumber(regsel)=reg;
         barData(1,reg)=sum(sel&regsel)/sum(regsel); 
         barData(2,reg)=sum(othersel&regsel)/sum(regsel);   
@@ -1547,12 +1571,12 @@ for ct=1:3
     barData=barData(:,reggrps);    
     b=bar(barData','stacked');
     b(2).FaceColor=[0.85 0.85 0.85];
-    b(1).FaceColor=catcolors{ct}; %value
+    b(1).FaceColor=catcolors{ct};
     upperCI=[];
     lowerCI=[];
     estmean=[];
     for reg=1:length(reggrps)
-        regsel=find(ismember(neuronGroup(category<8),reggrps(reg)),1);
+        regsel=find(ismember(neuronGroup(category<9),reggrps(reg)),1);
         estmean(1,reg)=ypred(regsel);
         upperCI(1,reg)=ypredCI(regsel,2);
         lowerCI(1,reg)=ypredCI(regsel,1);
@@ -1585,7 +1609,7 @@ for ct=1:3
             greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
-    s=subplot(4,3,9+ct);
+    s=subplot(4,4,12+ct);
     imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
@@ -1607,7 +1631,7 @@ end
 
 %% value models schematic
 examplePerms=[1 33];
-exampleNeurons=[9 11 14 22 25 30];
+exampleNeurons=[9];
 
 plotWindow=[0 2.5];
 plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
@@ -1636,7 +1660,7 @@ entries=find(category==1);
 for n=1:length(exampleNeurons)
     nn=entries(exampleNeurons(n));
     ta=[];
-    subplot(length(exampleNeurons),3,(n-1)*3+1);
+    subplot(length(exampleNeurons),5,(n-1)*5+1);
     %subplot(6,6,n);
     
     for os=1:2
@@ -1753,6 +1777,7 @@ for n=1:length(exampleNeurons)
         for cue=1:6
             originalValues=trialValues{session}(originalOrder==cue);
             newValue(newOrder==cue)=mean(originalValues(randsample(sum(originalOrder==cue),sum(newOrder==cue),'true')));
+            newCueValue(perms6all(perm,cue))=mean(originalValues(randsample(sum(originalOrder==cue),sum(newOrder==cue),'true')));
         end
 
         discreteUnfixed.values={newValue,ones(length(lickTimes),1),ones(length(boutStart),1)};
@@ -1770,11 +1795,12 @@ for n=1:length(exampleNeurons)
             kernel=bR3(:,1:components)*fitK;
             pred(test)=A3(test,:)*kernel;
         end
-        ve = 1- var(y-pred)/var(y);
+        ve(n,permn) = 1- var(y-pred)/var(y);
         
         trialPrediction=reshape(pred,[binsPerTrial length(pred)/binsPerTrial])';
         
         %3 conditions
+        examplePSTH={};
         selections={};
         selections{1,1}=csp1; %cs+
         selections{2,1}=csf1; %cs50
@@ -1792,15 +1818,19 @@ for n=1:length(exampleNeurons)
         end
         
         
-        subplot(length(exampleNeurons),3,(n-1)*3+1+permn);
+        subplot(length(exampleNeurons),5,(n-1)*5+1+permn);
+        hold on;
+        o=0;
+        for cue=1:3
         for os=1:2
+            o=o+1;
             
             
-            hold on;
-            for cue=1:3
-                activity=examplePSTH{cue,os}(plotBinsGLM);
-                plot(binTimesGLMTrl(plotBinsGLM),activity,specs{os},'linewidth',1,'color',colors{cue});
-                
+            
+            
+%                 activity=examplePSTH{cue,os}(plotBinsGLM);
+%                 plot(binTimesGLMTrl(plotBinsGLM),activity,specs{os},'linewidth',1,'color',colors{cue});
+                plot(binTimesGLMTrl(plotBinsGLM),kernel(1:sum(plotBinsGLM))*newCueValue(o),specs{os},'linewidth',1,'color',colors{cue});
             end
             
         end
@@ -1889,7 +1919,6 @@ for cue=1:3
         ylim([0.5 size(activity,1)+0.5])
         plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
         set(gca,'ytick',[]);
-        %if pn==1 ylabel('selective odor'); end
         if pn==1 xlabel('seconds from cue'); end
         if pn>1 xticks([]); end
         
@@ -1918,7 +1947,7 @@ for cue=1:3
         
         pn=pn+1;
         
-        ax(1)=subplot(2,20,30+(ct-1)*6+pn);
+        ax(1)=subplot(2,20,27+(ct-1)*6+pn);
         colormap(ax(1),map);
         hold on;
         
@@ -1932,7 +1961,45 @@ for cue=1:3
         ylim([0.5 size(activity,1)+0.5])
         plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
         set(gca,'ytick',[]);
-        %if pn==1 ylabel('selective odor'); end
+        if pn==1 xlabel('seconds from cue'); end
+        if pn>1 xticks([]); end
+        
+
+        
+    end
+    
+    
+    
+end
+
+pn=0;
+activity=[];
+sel=ismember(category,7:8);
+thisActivity=PSTH3{1,1}(sel,:);
+cueResp=mean(thisActivity(:,sortBins),2);
+
+regionCodeOpp=8-category;
+sortcrit=[regionCodeOpp(sel) cueResp];
+[~,sortOrder]=sortrows(sortcrit,[1 2]);
+for cue=1:3
+    for os=1:2
+        
+        pn=pn+1;
+        
+        ax(1)=subplot(2,20,34+(ct-1)*6+pn);
+        colormap(ax(1),map);
+        hold on;
+        
+        
+        activity = PSTH3{cue,os}(sel,:);
+        activity = activity(sortOrder,:);
+        
+
+        
+        imagesc(binTimes(plotBins),[1 length(activity)],activity(:,plotBins),[-3 3]);%[min(min(cspActivity)) max(max(cspActivity))]);
+        ylim([0.5 size(activity,1)+0.5])
+        plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
+        set(gca,'ytick',[]);
         if pn==1 xlabel('seconds from cue'); end
         if pn>1 xticks([]); end
         
@@ -1945,10 +2012,10 @@ for cue=1:3
 end
 
 
-titles={vnames{outliers},'non-meaning'};
+titles={vnames{outliers(1:end-1)},'non-specific','odor'};
 
-for ct=1:7
-ax(2)=subplot(4,7,7+ct);
+for ct=1:8
+ax(2)=subplot(4,8,8+ct);
 sel=category==ct;
 imagesc(nanmean(cueCorrMatrix(:,:,sel),3),CL);
 %title(titles(ct));
@@ -1959,7 +2026,7 @@ end
 
 plotWindow=[-0.5 2.5];
 plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
-for ct=1:7
+for ct=1:8
 sel=category==ct;
 activity=[];
 for cue=1:3
@@ -1973,7 +2040,7 @@ specs={'-','--'};
 for comp=1
     cond=0;
     if explained(comp)>5
-    subplot(4,7,ct)
+    subplot(4,8,ct)
     
     hold on
     for cue=1:3
@@ -1995,8 +2062,321 @@ for comp=1
 end
 
 end
+%%  plot PC1 value from each region
+figure;
+
+cueWindow=[0 2.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+
+neuronRegionOlf=neuronRegionAdj;
+neuronRegionOlf(ismember(neuronRegionAdj,{'EPd','PIR'}))={'OLF'};
+division=neuronRegionOlf;
+
+regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON','CP','ACB'};
+
+plotWindow=[-0.5 2.5];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+for reg=1:length(regions)
+    sel=ismember(division,regions(reg)) & category==1;
+activity=[];
+for cue=1:3
+    for os=1:2   
+        activity = [activity PSTH3{cue,os}(sel,plotBins)];
+    end
+end
+activity=activity./max(abs(activity),[],2);
+[coeff,score,~,~,explained]=pca(activity');
+specs={'-','--'};
+comp=1;
+if strcmp(regions(reg),'ACA') comp=2; end
+cond=0;
+if explained(comp)>5
+    subplot(4,9,reg)
+    
+    hold on
+    for cue=1:3
+        for os=1:2
+            cond=cond+1;
+            plot(binTimes(plotBins),-score((cond-1)*sum(plotBins)+1:cond*sum(plotBins),comp),specs{os},'color',colors{cue},'linewidth',1);
+        end
+    end
+    ylabel(sprintf('#%g (%g%%)',comp,round(explained(comp),1)));
+    yticks([]);
+    xticks([0 2.5]);
+    title(regions{reg});
+    
+    %     plot([0 0],[min(score(:,comp)) max(score(:,comp))],':','color','k','linewidth',0.5);
+    %     plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+    
+end
+xlim(cueWindow);
+xlabel(sprintf('n = %d',sum(sel)));
 
 
+
+end
+
+division=neuronGroup;
+for reg=1:4
+    sel=ismember(division,reg) & category==1;
+activity=[];
+for cue=1:3
+    for os=1:2   
+        activity = [activity PSTH3{cue,os}(sel,plotBins)];
+    end
+end
+activity=activity./max(abs(activity),[],2);
+[coeff,score,~,~,explained]=pca(activity');
+specs={'-','--'};
+for comp=1
+    cond=0;
+    if explained(comp)>5
+    subplot(4,9,18+reg)
+    
+    hold on
+    for cue=1:3
+        for os=1:2
+            cond=cond+1;
+            plot(binTimes(plotBins),-score((cond-1)*sum(plotBins)+1:cond*sum(plotBins),comp),specs{os},'color',colors{cue},'linewidth',1);
+        end
+    end
+    ylabel(sprintf('#%g (%g%%)',comp,round(explained(comp),1)));
+    yticks([]);
+    xticks([0 2.5]);
+    xlabel(sprintf('n = %d',sum(sel)));
+    if comp==1 title(regionGroupNames{reg}); end
+    
+%     plot([0 0],[min(score(:,comp)) max(score(:,comp))],':','color','k','linewidth',0.5);
+%     plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+    
+    end
+    xlim(cueWindow);
+end
+
+end
+
+%%  PCA value analysis for each region
+figure;
+numstraps=5000;
+numn=10;
+neuronRegionOlf=neuronRegionAdj;
+neuronRegionOlf(ismember(neuronRegionAdj,{'EPd','PIR'}))={'OLF'};
+division=neuronRegionOlf;
+
+regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
+reggrps=[1:3];
+
+plotWindow=[0 2.5];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+plotBinTimes=binTimes(plotBins);
+meanWindow=[1 2.5];
+meanBins=plotBinTimes>=meanWindow(1) & plotBinTimes<=meanWindow(2);
+baseWindow=[0 0.5];
+baseBins=plotBinTimes>=baseWindow(1) & plotBinTimes<=baseWindow(2);
+
+cats={1,2:8};
+valScoreStrap=cell(2);
+for c=1:2
+    valScoreStrap{c}=NaN(numstraps,length(regions));
+
+for reg=1:length(regions)
+    sel=ismember(division,regions(reg)) & ismember(category,cats{c});
+    activitySep=cell(2,1);
+    activity=[];
+    for cue=1:3
+        for os=1:2
+            activity = [activity PSTH3{cue,os}(sel,plotBins)];
+            activitySep{os} = [activitySep{os} PSTH3{cue,os}(sel,plotBins)];
+        end
+    end
+    %activity=activity./max(abs(activity),[],2);
+    for os=1:2
+        activitySep{os} = activitySep{os}./max(abs(activity),[],2);
+    end
+    
+    if strcmp(regions(reg),'PL') & c==1
+        [coeff,projscore{1},~,~,explained]=pca(activitySep{1}');
+        projscore{2}=activitySep{2}' * coeff;
+        
+        
+        specs={'-','--'};
+        for os=1:2
+            
+            subplot(2,2,os);
+            hold on;
+            cond=0;
+            for cue=1:3
+                cond=cond+1;
+                plot3(projscore{os}((cond-1)*sum(plotBins)+1:cond*sum(plotBins),1),projscore{os}((cond-1)*sum(plotBins)+1:cond*sum(plotBins),2),projscore{os}((cond-1)*sum(plotBins)+1:cond*sum(plotBins),3),specs{os},'color',colors{cue},'linewidth',1);
+            end
+            if os==1
+                ylabel('PC2');
+                xlabel('PC1');
+                zlabel('PC3');
+                title(regions{reg});
+            end
+            %     yticks([]);
+            %     xticks([]);
+            %     zticks([]);
+            %     axis([-4 15 -4 15 -4 15]);
+            view(160,60);
+        end
+        
+        
+        
+    end
+    
+    for strap=1:numstraps
+        entries=randsample(sum(sel),numn,'false');
+        [coeff,projscore{1},~,~,explained]=pca(activitySep{1}(entries,:)');
+        projscore{2}=activitySep{2}(entries,:)' * coeff;    
+        
+        %dimension 1 is time
+        %dimension 2 is cue
+        %dimension 3 is component
+        vectors=reshape(projscore{2}(:,1:3),[sum(plotBins),3,3]);
+        
+        distPM=NaN(sum(plotBins),1);
+        distPF=NaN(sum(plotBins),1);
+        distFM=NaN(sum(plotBins),1);
+        distP=NaN(sum(plotBins),1);
+        distF=NaN(sum(plotBins),1);
+        distM=NaN(sum(plotBins),1);        
+        baseline=mean([squeeze(mean(vectors(baseBins,1,:))),squeeze(mean(vectors(baseBins,2,:))),squeeze(mean(vectors(baseBins,3,:)))],2);
+        alldistances=pdist2(projscore{2}(:,1:3),projscore{2}(:,1:3),'euclidean');
+        maxDistance=max(alldistances,[],'all');
+        for bin=1:sum(plotBins)
+%             distPM(bin,1)=norm(squeeze(vectors(bin,1,:)-vectors(bin,3,:)));
+%             distPF(bin,1)=norm(squeeze(vectors(bin,1,:)-vectors(bin,2,:)));
+%             distFM(bin,1)=norm(squeeze(vectors(bin,2,:)-vectors(bin,3,:)));
+            distP(bin,1)=norm(squeeze(vectors(bin,1,:))-baseline)/maxDistance;
+            distF(bin,1)=norm(squeeze(vectors(bin,2,:))-baseline)/maxDistance;
+            distM(bin,1)=norm(squeeze(vectors(bin,3,:))-baseline)/maxDistance;
+        end
+
+%         distPFM=distPF+distFM;
+%         
+%         discScore=distPM./maxDistance .* distPF./maxDistance .* distFM./maxDistance;
+%         axisScore=distPM ./ distPFM;
+%         valueScore=discScore.*axisScore;
+%         %valueScore=axisScore;
+        valScoreStrap{c,1}(strap,reg)=mean(distP(meanBins));
+        valScoreStrap{c,2}(strap,reg)=mean(distF(meanBins));
+        valScoreStrap{c,3}(strap,reg)=mean(distM(meanBins));
+    end
+end
+end
+
+
+for c=1:2
+    subplot(4,2,4+c)
+hold on
+for cue=1:3
+errorbar([1:length(regions)]-0.2+0.2*(cue-1),mean(valScoreStrap{c,cue},1),std(valScoreStrap{c,cue},1),'o','color',colors{cue});
+end
+title('Distance from baseline');
+ylim([0 1]);
+xlim([0 length(regions)+1]);
+xticks(1:length(regions));
+yticks([0 1]);
+
+end
+
+bootpc=cell(3,2);
+for c=1:2
+for cue=1:3
+bootpc{cue,c}=NaN(length(regions));
+for con1=1:length(regions)
+    for con2=1:length(regions)
+        bootpc{cue,c}(con1,con2)=(sum(sum(valScoreStrap{c,cue}(:,con1)<=valScoreStrap{c,cue}(:,con2)'))+1)/(numstraps^2+1);
+    end
+end
+end
+end
+
+rankp=cell(1,2);
+for c=1:2
+rankp{c}=NaN(2,length(regions));
+for reg=1:length(regions)
+    rankp{c}(1,reg)=(sum(sum(valScoreStrap{c,1}(:,reg)<=valScoreStrap{c,2}(:,reg)'))+1)/(numstraps^2+1);
+    rankp{c}(2,reg)=(sum(sum(valScoreStrap{c,2}(:,reg)<=valScoreStrap{c,3}(:,reg)'))+1)/(numstraps^2+1);
+end
+end
+
+%for region groups
+numn=60;
+valScoreStrap=cell(2);
+for c=1:2
+    valScoreStrap{c}=NaN(numstraps,length(reggrps));
+
+for reg=1:length(reggrps)
+    sel=ismember(neuronGroup,reggrps(reg)) & ismember(category,cats{c});
+    activitySep=cell(2,1);
+    activity=[];
+    for cue=1:3
+        for os=1:2
+            activity = [activity PSTH3{cue,os}(sel,plotBins)];
+            activitySep{os} = [activitySep{os} PSTH3{cue,os}(sel,plotBins)];
+        end
+    end
+    %activity=activity./max(abs(activity),[],2);
+    for os=1:2
+        activitySep{os} = activitySep{os}./max(abs(activity),[],2);
+    end
+    
+    for strap=1:numstraps
+        entries=randsample(sum(sel),numn,'false');
+        [coeff,projscore{1},~,~,explained]=pca(activitySep{1}(entries,:)');
+        projscore{2}=activitySep{2}(entries,:)' * coeff;    
+        
+        %dimension 1 is time
+        %dimension 2 is cue
+        %dimension 3 is component
+        vectors=reshape(projscore{2}(:,1:3),[sum(plotBins),3,3]);
+        
+        distPM=NaN(sum(plotBins),1);
+        distPF=NaN(sum(plotBins),1);
+        distFM=NaN(sum(plotBins),1);
+        distP=NaN(sum(plotBins),1);
+        distF=NaN(sum(plotBins),1);
+        distM=NaN(sum(plotBins),1);        
+        baseline=mean([squeeze(mean(vectors(baseBins,1,:))),squeeze(mean(vectors(baseBins,2,:))),squeeze(mean(vectors(baseBins,3,:)))],2);
+        alldistances=pdist2(projscore{2}(:,1:3),projscore{2}(:,1:3),'euclidean');
+        maxDistance=max(alldistances,[],'all');
+        for bin=1:sum(plotBins)
+%             distPM(bin,1)=norm(squeeze(vectors(bin,1,:)-vectors(bin,3,:)));
+%             distPF(bin,1)=norm(squeeze(vectors(bin,1,:)-vectors(bin,2,:)));
+%             distFM(bin,1)=norm(squeeze(vectors(bin,2,:)-vectors(bin,3,:)));
+            distP(bin,1)=norm(squeeze(vectors(bin,1,:))-baseline)/maxDistance;
+            distF(bin,1)=norm(squeeze(vectors(bin,2,:))-baseline)/maxDistance;
+            distM(bin,1)=norm(squeeze(vectors(bin,3,:))-baseline)/maxDistance;
+        end
+
+%         distPFM=distPF+distFM;
+%         
+%         discScore=distPM./maxDistance .* distPF./maxDistance .* distFM./maxDistance;
+%         axisScore=distPM ./ distPFM;
+%         valueScore=discScore.*axisScore;
+%         %valueScore=axisScore;
+        valScoreStrap{c,1}(strap,reg)=mean(distP(meanBins));
+        valScoreStrap{c,2}(strap,reg)=mean(distF(meanBins));
+        valScoreStrap{c,3}(strap,reg)=mean(distM(meanBins));
+    end
+end
+end
+
+
+for c=1:2
+    subplot(4,3,9+c)
+hold on
+for cue=1:3
+errorbar([1:length(reggrps)]-0.2+0.2*(cue-1),mean(valScoreStrap{c,cue},1),std(valScoreStrap{c,cue},1),'o','color',colors{cue});
+end
+ylim([0 1]);
+yticks([0 1]);
+xlim([0 length(reggrps)+1]);
+xticks(1:length(reggrps));
+end
 
 %% GLM spatial plotting, 3D
 figure;
@@ -2025,6 +2405,238 @@ else
 end
 
 end
+
+%% coding dimension for CS+/CS50/CS-
+figure;
+%categories for subselection
+sels={};
+sels{1}=ismember(category,8);
+sels{2}=ismember(category,2:6);
+sels{3}=category==1;
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+vcolors={[0.05 0.25 0.45],[0.7 0 1],[0 0.7 1]};
+
+numstraps=5000;
+amin=-0.1;
+amax=1.2;
+cueWindow=[0 2.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+
+plotWindow=[-1 10];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+plotBinTimes=binTimes(plotBins);
+baseBins=plotBinTimes<0;
+
+%normalize activity from 0-1
+dffPSTH6n={};
+dffPSTH3n={};
+for session=1
+    dffPSTH6all=[];
+    for condition=1:6
+        dffPSTH6all=cat(2,dffPSTH6all,PSTH6{condition,session}(:,cueBins));
+    end
+end
+for session=1:2
+    for condition=1:6
+       dffPSTH6n{condition,session}=PSTH6{condition,session}./max(abs(dffPSTH6all),[],2); 
+    end
+end
+
+%get activity for dimensions
+csmActivity=dffPSTH6n{5,1}(:,cueBins);
+cspActivity=dffPSTH6n{1,1}(:,cueBins);
+csfActivity=dffPSTH6n{3,1}(:,cueBins);
+
+bigBinSize=5;
+bigBins=floor(sum(cueBins)/bigBinSize);
+bsf=0;
+for bb=1:bigBins
+    csmActivityB(:,bb)=mean(csmActivity(:,bsf+1:bsf+bigBinSize),2);
+    cspActivityB(:,bb)=mean(cspActivity(:,bsf+1:bsf+bigBinSize),2);
+    csfActivityB(:,bb)=mean(csfActivity(:,bsf+1:bsf+bigBinSize),2);
+    
+    bsf=bsf+bigBinSize;
+end
+
+[~,PMind]=max(abs(cspActivityB-csmActivityB),[],2,'linear');
+[~,PFind]=max(abs(cspActivityB-csfActivityB),[],2,'linear');
+[~,FMind]=max(abs(csfActivityB-csmActivityB),[],2,'linear');
+
+differenceVectorPM=cspActivityB(PMind)-csmActivityB(PMind);
+differenceVectorPF=cspActivityB(PFind)-csfActivityB(PFind);
+differenceVectorFM=csfActivityB(FMind)-csmActivityB(FMind);
+
+
+sproj={};
+oproj={};
+disttime={};
+
+%for getting 0 and 1, use z-score
+csmActivity=PSTH6{5,1}(:,cueBins);
+cspActivity=PSTH6{1,1}(:,cueBins);
+csfActivity=PSTH6{3,1}(:,cueBins);
+
+bsf=0;
+for bb=1:bigBins
+    csmActivityB(:,bb)=mean(csmActivity(:,bsf+1:bsf+bigBinSize),2);
+    cspActivityB(:,bb)=mean(cspActivity(:,bsf+1:bsf+bigBinSize),2);
+    csfActivityB(:,bb)=mean(csfActivity(:,bsf+1:bsf+bigBinSize),2);
+    
+    bsf=bsf+bigBinSize;
+end
+
+projCorrStrp=NaN(numstraps,length(sels));
+baseCSMdist=NaN(numstraps,length(sels));
+cspfangle=NaN(numstraps,length(sels));
+for cl=1:length(sels)
+    sel=sels{cl};
+    
+    PF1=differenceVectorPF(sel)' * cspActivityB(PFind(sel));
+    PF0=differenceVectorPF(sel)' * csfActivityB(PFind(sel));
+    PM1=differenceVectorPM(sel)' * cspActivityB(PMind(sel));
+    PM0=differenceVectorPM(sel)' * csmActivityB(PMind(sel));
+    FM1=differenceVectorFM(sel)' * csfActivityB(FMind(sel));
+    FM0=differenceVectorFM(sel)' * csmActivityB(FMind(sel));
+
+    for cue=1:3
+        sproj{cue,1}=(differenceVectorPM(sel)' * PSTH6{(cue-1)*2+2,1}(sel,:) - PM0) ./ (PM1 - PM0);
+        sproj{cue,2}=(differenceVectorPF(sel)' * PSTH6{(cue-1)*2+2,1}(sel,:) - PF0) ./ (PF1 - PF0);
+        sproj{cue,3}=(differenceVectorFM(sel)' * PSTH6{(cue-1)*2+2,1}(sel,:) - FM0) ./ (FM1 - FM0);
+        
+        oproj{cue,1}=(differenceVectorPM(sel)' * PSTH3{cue,2}(sel,:) - PM0) ./ (PM1 - PM0);
+        oproj{cue,2}=(differenceVectorPF(sel)' * PSTH3{cue,2}(sel,:) - PF0) ./ (PF1 - PF0);
+        oproj{cue,3}=(differenceVectorFM(sel)' * PSTH3{cue,2}(sel,:) - FM0) ./ (FM1 - FM0);
+    end
+    
+    subplot(3,4,1+(cl-1)*4);
+    hold on;
+    for cue=1:3
+        plot(sproj{cue,1}(plotBins),sproj{cue,3}(plotBins),':','linewidth',1,'color',colors{cue});
+        plot(sproj{cue,1}(cueBins),sproj{cue,3}(cueBins),'linewidth',1,'color',colors{cue});
+    end
+    axis([amin amax amin amax amin amax]);
+    if cl==1
+        title('same odor set');
+            xlabel('CS- ---> CS+');
+        ylabel('CS- ---> CS50');
+    end
+    xticks([0 1]);
+    yticks([0 1]);
+    
+    subplot(3,4,2+(cl-1)*4);
+    hold on;
+    for cue=1:3
+        plot(oproj{cue,1}(plotBins),oproj{cue,3}(plotBins),':','linewidth',1,'color',colors{cue});
+        plot(oproj{cue,1}(cueBins),oproj{cue,3}(cueBins),'linewidth',1,'color',colors{cue});
+    
+    end
+    axis([amin amax amin amax amin amax]);
+    xticks([]);
+    yticks([]);
+    if cl==1 title('other odor set'); end     
+     
+     
+     %bootstrap a statistic
+     incNeur=find(sel);
+
+     for strap=1:numstraps
+         ns=incNeur(randsample(length(incNeur),length(incNeur),'true'));
+         PF1=differenceVectorPF(ns)' * cspActivityB(PFind(ns));
+         PF0=differenceVectorPF(ns)' * csfActivityB(PFind(ns));
+         PM1=differenceVectorPM(ns)' * cspActivityB(PMind(ns));
+         PM0=differenceVectorPM(ns)' * csmActivityB(PMind(ns));
+         FM1=differenceVectorFM(ns)' * csfActivityB(FMind(ns));
+         FM0=differenceVectorFM(ns)' * csmActivityB(FMind(ns));
+         
+         for cue=1:3
+             sproj{cue,1}=(differenceVectorPM(ns)' * PSTH6{(cue-1)*2+2,1}(ns,cueBins) - PM0) ./ (PM1 - PM0);
+             sproj{cue,2}=(differenceVectorPF(ns)' * PSTH6{(cue-1)*2+2,1}(ns,cueBins) - PF0) ./ (PF1 - PF0);
+             sproj{cue,3}=(differenceVectorFM(ns)' * PSTH6{(cue-1)*2+2,1}(ns,cueBins) - FM0) ./ (FM1 - FM0);
+             
+             oproj{cue,1}=(differenceVectorPM(ns)' * PSTH3{cue,2}(ns,cueBins) - PM0) ./ (PM1 - PM0);
+             oproj{cue,2}=(differenceVectorPF(ns)' * PSTH3{cue,2}(ns,cueBins) - PF0) ./ (PF1 - PF0);
+             oproj{cue,3}=(differenceVectorFM(ns)' * PSTH3{cue,2}(ns,cueBins) - FM0) ./ (FM1 - FM0);
+         end
+     
+         %only use CS- subtracted axes for correlation
+         sprojall=cat(1,sproj{:,[1 3]});
+         oprojall=cat(1,oproj{:,[1 3]});
+         projCorrStrp(strap,cl)=corr(sprojall(:),oprojall(:));
+         
+         %baseline distance from CS-
+         basex=mean([sproj{1,1}(baseBins) sproj{2,1}(baseBins) sproj{3,1}(baseBins)]);
+         basey=mean([sproj{1,3}(baseBins) sproj{2,3}(baseBins) sproj{3,3}(baseBins)]);
+         baseCSMdist(strap,cl)=sqrt(basex^2+basey^2);
+         
+         %angle between CS+ at peak along (CS-/CS+) and CS50 at peak along (CS-/CS50)
+         [cspx,bin]=max(sproj{1,1}); %CSP
+         cspy=sproj{1,3}(bin);        
+         [csfy,bin]=max(sproj{2,3}); %CSF
+         csfx=sproj{2,1}(bin);        
+         v_1 = [cspx,cspy,0] - [basex,basey,0];
+         v_2 = [csfx,csfy,0] - [basex,basey,0];
+         cspfangle(strap,cl) = atan2(norm(cross(v_1, v_2)), dot(v_1, v_2)) * 180/pi; %angle
+         
+     end
+     
+
+     
+
+end
+
+subplot(2,4,7);
+hold on;
+for c=1:3
+histogram(baseCSMdist(:,c),0.1:0.01:1,'facecolor',vcolors{c},'edgecolor',vcolors{c},'orientation','horizontal','normalization','probability');
+end
+
+ylabel('dist from cs-');
+xlabel('frequency');
+legend('odor','trial type','value');
+bootp=(sum(sum(baseCSMdist(:,1)<=baseCSMdist(:,3)'))+1)/(numstraps^2+1);
+text(0.1,0.9,sprintf('p = %g',round(bootp,2,'significant')));
+bootp=(sum(sum(baseCSMdist(:,2)<=baseCSMdist(:,3)'))+1)/(numstraps^2+1);
+text(0.1,0.8,sprintf('p = %g',round(bootp,2,'significant')));
+ylim([0 0.8]);
+
+subplot(2,4,8);
+hold on;
+for c=1:3
+histogram(cspfangle(:,c),0:1:110,'facecolor',vcolors{c},'edgecolor',vcolors{c},'orientation','horizontal','normalization','probability');
+end
+
+ylabel('CS+, CS50 angle');
+xlabel('frequency');
+legend('odor','trial type','value');
+bootp=(sum(sum(cspfangle(:,1)<=cspfangle(:,3)'))+1)/(numstraps^2+1);
+text(0.05,25,sprintf('p = %g',round(bootp,2,'significant')));
+bootp=(sum(sum(cspfangle(:,2)<=cspfangle(:,3)'))+1)/(numstraps^2+1);
+text(0.15,25,sprintf('p = %g',round(bootp,2,'significant')));
+bootp=(sum(sum(cspfangle(:,1)>=cspfangle(:,2)'))+1)/(numstraps^2+1);
+text(0.05,95,sprintf('p = %g',round(bootp,2,'significant')));
+ylim([0 90]);
+yticks([0 45 90]);
+
+
+subplot(2,4,4);
+hold on;
+for c=1:3
+histogram(projCorrStrp(:,c),0.8:0.001:1,'facecolor',vcolors{c},'edgecolor',vcolors{c},'orientation','horizontal','normalization','probability');
+end
+
+ylabel('same/other correlation');
+xlabel('frequency');
+legend('odor','trial type','value');
+bootp=(sum(sum(projCorrStrp(:,1)>=projCorrStrp(:,3)'))+1)/(numstraps^2+1);
+text(0.05,.97,sprintf('p = %g',round(bootp,3,'significant')));
+bootp=(sum(sum(projCorrStrp(:,2)>=projCorrStrp(:,3)'))+1)/(numstraps^2+1);
+text(0.15,.97,sprintf('p = %g',round(bootp,3,'significant')));
+bootp=(sum(sum(projCorrStrp(:,1)>=projCorrStrp(:,2)'))+1)/(numstraps^2+1);
+text(0.2,.93,sprintf('p = %g',round(bootp,3,'significant')));
+ylim([0.9 1]);
+yticks([0.9 0.95 1]);
 
 
 %% perform regression for shuffling trial values for value cells
@@ -2147,7 +2759,7 @@ for ct=1
     hold on;
     sel=category==1 & bestValue==1;
     othervalue=ismember(category,1)&~sel;
-    othersel=ismember(category,2:7);
+    othersel=ismember(category,2:8);
     regionnumber=zeros(totalNeurons,1);
     for reg=1:length(allReg)
         regsel=ismember(neuronRegionOlf,allReg(reg));
@@ -2214,7 +2826,7 @@ for ct=1
     xtickangle(45);
     yticks(1:length(regions));
     yticklabels(regions);
-    title(titles{ct});
+    %title(titles{ct});
     if ct==1
         ylabel('increase in this region...');
         xlabel('over this region');
@@ -2281,7 +2893,7 @@ for ct=1
     xtickangle(45);
     yticks(1:length(reggrps));
     yticklabels(regionGroupNames(reggrps));
-    title(titles{ct});
+    %title(titles{ct});
     if ct==1
         ylabel('increase in this region...');
         xlabel('over this region');
@@ -2313,7 +2925,7 @@ for ct=1
     hold on;
     sel=category==1 & bestValue==1;
     othervalue=ismember(category,1)&~sel;
-    othersel=ismember(category,2:7);
+    othersel=ismember(category,2:8);
     regionnumber=zeros(totalNeurons,1);
     for reg=1:length(allReg)
         regsel=ismember(neuronRegionOlf,allReg(reg))&category==1;
@@ -2380,7 +2992,7 @@ for ct=1
     xtickangle(45);
     yticks(1:length(regions));
     yticklabels(regions);
-    title(titles{ct});
+    %title(titles{ct});
     if ct==1
         ylabel('increase in this region...');
         xlabel('over this region');
@@ -2447,14 +3059,13 @@ for ct=1
     xtickangle(45);
     yticks(1:length(reggrps));
     yticklabels(regionGroupNames(reggrps));
-    title(titles{ct});
+    %title(titles{ct});
     if ct==1
         ylabel('increase in this region...');
         xlabel('over this region');
     end        
     
 end
-
 %% value models schematic
 examplePerms=[1 1];
 exampleNeurons=[5 20 50 72 111 141];
@@ -2674,9 +3285,9 @@ sels={};
 sels{1}=category==1 & bestValue==1;
 sels{2}=category==1 & bestValue==2;
 sels{3}=ismember(category,2:6);
-sels{4}=ismember(category,7);
+sels{4}=ismember(category,7:8);
 sels{5}=behavior;
-cattitles={'value (history)','value (non-history)','meaning (non-value)','non-meaning','lick, cue+lick'};
+cattitles={'value (history)','value (non-history)','trial type','other cue','lick, cue+lick'};
 
 valcolors{1,1}=[0.2 0.2 0.2];
 valcolors{2,1}=[0.5 0.5 0.5];
@@ -2870,13 +3481,13 @@ for cl=1:length(sels)
     
 end
 
-%% get proportions of value and meaning and compare between regions for striatum
+%% get proportions of value and trial type and compare between regions for striatum
 regions={'ACA','FRP','PL','ILA','ORB','CP','ACB'};
 
 
 %fit all together, allowing random effect of session to have more power
 catcolors={[0 0.7 1],[0.7 0 1],[0.6 0.6 0.6]};
-titles={'value','meaning (non-value)','non-meaning'};
+titles={'value','trial type (non-value)','non-trial type'};
 cats={1,2:6,7};
 for ct=1:3
     %region
@@ -2884,7 +3495,7 @@ for ct=1:3
     subplot(4,3,ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;
+    othersel=ismember(category,1:8)&~sel;
     regionnumber=zeros(totalNeurons,1);
     for reg=1:length(regions)
         regsel=ismember(neuronRegionOlf,regions(reg));
@@ -2897,12 +3508,8 @@ for ct=1:3
     [ypred,ypredCI]=predict(lm,'conditional',false);
     
     b=bar(barData','stacked');
-    %b(3).FaceColor=[0.4 0 0.5]; %odor
-    b(2).FaceColor=[0.85 0.85 0.85]; %meaning
-    b(1).FaceColor=catcolors{ct}; %value
-    %b(4).FaceColor=[0 0 0.2]; %odor
-    % b(5).FaceColor=[0.9 0.2 0];
-    %b(3).FaceColor=[1 1 1];
+    b(2).FaceColor=[0.85 0.85 0.85];
+    b(1).FaceColor=catcolors{ct};
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -2962,7 +3569,7 @@ for ct=1:3
     subplot(4,3,6+ct);
     hold on;
     sel=ismember(category,cats{ct});
-    othersel=ismember(category,1:7)&~sel;    
+    othersel=ismember(category,1:8)&~sel;    
     regionnumber=zeros(totalNeurons,1);
     regs=[2 4];
     for reg=1:2
@@ -2976,8 +3583,12 @@ for ct=1:3
     [ypred,ypredCI]=predict(lm,'conditional',false);
     
     b=bar(barData','stacked');
+    %b(3).FaceColor=[0.4 0 0.5]; %odor
     b(2).FaceColor=[0.85 0.85 0.85];
     b(1).FaceColor=catcolors{ct}; %value
+    %b(4).FaceColor=[0 0 0.2]; %odor
+    % b(5).FaceColor=[0.9 0.2 0];
+    %b(3).FaceColor=[1 1 1];
     upperCI=[];
     lowerCI=[];
     estmean=[];

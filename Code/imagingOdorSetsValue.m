@@ -1,4 +1,4 @@
-% Script to analyze value coding across day 3 of each odor set
+% Script to analyze olfactory conditioning data across day 3 of each odor set
 githubDir = 'D:\GitHub';
 addpath(genpath(fullfile(githubDir, 'npy-matlab')))
 addpath(genpath(fullfile(githubDir, 'steinmetz-et-al-2019')))
@@ -559,6 +559,7 @@ for session=1:length(sessions)
 %             medianF=medfilt1(double(correctedF),7);
             
             decSpks=spks(roiNum,firstFrame(mouse,session):lastFrame(mouse,session));
+            %decSpks=smooth(decSpks,5)'; %to account for error in estimating deconvolved spike frame
             
             %smooth with the same filter used for ephys
             spikeRateSmooth=NaN(1,length(decSpks));
@@ -599,6 +600,16 @@ for session=1:length(sessions)
 
             end         
 
+%             %4 conditions
+%             selections{1,1}=cue1; %cs+
+%             selections{2,1}=cue2r; %reward+
+%             selections{3,1}=cue2u; %reward-
+%             selections{4,1}=cue3; %cs- 
+%             for condition=1:length(selections)
+%                 sel = ismember(round(cue),round(selections{condition}));
+%                 dffPSTH4{condition,session}(NN,:)=nanmean(binneddFF(sel,:));
+%             end
+            
             %3 conditions, odd and even trials
             selections={};
             selections{1,1}=cue1; %cs+
@@ -644,6 +655,9 @@ for session=1:length(sessions)
             includedActivitySh=binneddFF(shOrder,includedBins)';
             activityVector=includedActivity(:);
             activityVectorSh=includedActivitySh(:);
+            %normalize from 0 to 1
+%             activityVectorSh=activityVectorSh/std(activityVectorSh);
+%             activityVector=activityVector/std(activityVector);
             Yall{NS,1}(:,roi)=activityVector;
             YallSh{NS,1}(:,roi)=activityVectorSh;
             
@@ -761,6 +775,9 @@ for mouse=1:length(mice)
         for fold=1:folds
             train=trains{fold};
             test=train==0;
+            %                 fit = glmnet(rA(train,:), y(train), 'gaussian', opts);
+            %                 this_a = glmnetCoef(fit, lambda);
+            %                 fitK = this_a(2:end);
             fitK=lassoglm(rA(train,:),y(train),'normal','alpha',0.5,'lambda',lambda);
             kernel=bR(:,1:components)*fitK;
             predLam(test,:)=A(test,:)*kernel;
@@ -795,7 +812,12 @@ for mouse=1:length(mice)
             end
             predF{NN,1+sub}=pred;
             varExp(NN,1+sub) = 1- var(y-pred)/var(y);
-
+            
+%             %variance over time
+%             for tb=1:binsPerTrial
+%                 tbsel=tb:binsPerTrial:length(y);
+%                 varExpT.(sn){NN,1+sub}(tb)=1- var(y(tbsel)-pred(tbsel))/var(y(tbsel));
+%             end
         end
         
         
@@ -820,6 +842,11 @@ for mouse=1:length(mice)
                 
                 rA3 = A3Sh{perm} * bR3(:,1:valueComponents);
                 trains = getfolds(rA3,folds,binsPerTrial);
+                
+                %         if ismember(perm,topModels)
+                %            display(perms6all(perm,:));display([combinedValues(1:10) newValue(1:10)]);
+                %         end
+                
                 
                 pred=NaN(size(y,1),1);
                 for fold=1:folds
@@ -846,11 +873,12 @@ varExpValueSh(:,2)=varExp(:,2);
 varExpValueSh(:,3)=varExp(:,5);
 
 
-%% value coding analysis 90
 
+
+%% value coding analysis 90 with untuned
 improvCutoff=0.02;
 overallCutoff=0.02;
-improvement=-(varExp-varExp(:,1));
+improvement=varExp(:,1)-varExp;
 
 %get proportions
 predictive = varExp(:,1)>overallCutoff; %more than 2% of variance explained
@@ -866,44 +894,52 @@ end
 
 %value specific variance
 %whatever is accounted for by value kernel
-cueVariance=totalCueVariance - valueImp(:,[4:end-1]);
+cueVariance=totalCueVariance - valueImp(:,[4:end]);
 [~,bestModel]=max(cueVariance,[],2);
+bestModel(isnan(cueVariance(:,1)))=NaN;
 
 figure;
 
 cueNames={'+','+','50','50','-','-'};
+odorValues=[0.5 0.5 0.37 0.37 0.05 0.05];
 vnames={};
+shuffVals=NaN(90,6);
 for n=1:length(perms6all)
     vnames{n,1}=append(cueNames{perms6all(n,:)==1},'/',cueNames{perms6all(n,:)==2},', ',cueNames{perms6all(n,:)==3},'/',cueNames{perms6all(n,:)==4},', ',cueNames{perms6all(n,:)==5},'/',cueNames{perms6all(n,:)==6});
+    for odor=1:6
+        shuffVals(n,odor)=odorValues(perms6all(n,:)==odor);
+    end
 end
 
 subplot(3,1,1);
 hold on
-frequency=histcounts(bestModel(cueK&~behavior),0.5:1:90.5,'normalization','probability');
-outliers=frequency>0.04;
+frequency=histcounts(bestModel(cueK&~behavior&~isnan(bestModel)),0.5:1:91.5,'normalization','probability');
+outliers=frequency>0.05;
 topModels=find(outliers);
-b=bar(1:max(bestModel),frequency,'facecolor',[0.6 0.6 0.6],'linewidth',0.01);
+b=bar([1:max(bestModel)-1 max(bestModel)+1],frequency,'facecolor',[0 0.2 0.4],'linewidth',0.01);
 b.FaceColor='flat';
 for e=1:length(topModels)
-b.CData(topModels(e),:)=[0.7 0 1]; %meaning
+b.CData(topModels(e),:)=[0.7 0 1]; %trial type
 end
 b.CData(1,:)=[0 0.7 1]; %value
+b.CData(end,:)=[0.6 0.6 0.6]; %non-specific
 
 
 
 ylabel('fraction of cue cells');
 
-chance=1/90;
+chance=1/90 * sum(bestModel(cueK&~behavior&~isnan(bestModel))<91)/sum(cueK&~behavior&~isnan(bestModel));
 plot([0 91],[chance chance],':','color','k','linewidth',0.5);
-xlim([0 91]);
+xlim([0 93]);
 ylim([0 0.3]);
-xticks(topModels);
+xticks(topModels(1:end-1));
 yticks(0:0.1:0.3);
 %xtickangle(45);
-%xticklabels(vnames(outliers));
+xticklabels(vnames(outliers(1:end-1)));
+xtickangle(45);
 
-category=8*ones(length(improvement),1);
-category(cueK&~behavior)=7; %cue neurons
+category=9*ones(length(improvement),1);
+category(cueK&~behavior)=8; %cue neurons
 %categorize neurons by their best model if it's in the top models
 for bm=1:length(topModels)
 category(cueK&~behavior&bestModel==topModels(bm))=bm; %cue, odor
@@ -933,6 +969,7 @@ for NN=1:totalNeurons
         end
         
     end
+    %cueVector=cueVector-mean(cueVector,2);
     corrmat=corrcoef(cueVector);
     
     cueCorrMatrix(:,:,NN)=corrmat;
@@ -1035,7 +1072,7 @@ for cue=1:3
 end
 
 
-titles={vnames{outliers},'non-meaning'};
+titles={vnames{outliers(1:end-1)},'untuned','odor'};
 
 for ct=1:7
 ax(2)=subplot(4,7,7+ct);
@@ -1088,10 +1125,6 @@ for comp=1
 end
 end
 end
-
-%% history coding
-
-[~,bestValue]=max(varExpValueSh(:,3:4),[],2);
 
 %% remove doubles (from merging) and edge of FOV rois
 function iscell = processROIs(iscell,stat,F)

@@ -200,6 +200,21 @@ for reg=1:length(regions)
     regleg{reg}=sprintf('%s (%d)',regions{reg},regionNeurons(reg));
 end
 legend(regleg);
+%%
+figure;
+subjects=unique(neuronSubject);
+subjregn=zeros(length(subjects),length(regions));
+for subj=1:length(subjects)
+    for reg=1:length(regions)
+        subjregn(subj,reg)=sum(ismember(neuronSubject,subjects(subj))&ismember(neuronRegionOlf,regions(reg)));
+    end
+end
+heatmap(subjregn);
+% colormap('summer');
+% yticks(1:length(subjects));
+% yticklabels(subjects);
+% xticks(1:length(regions));
+% xticklabels(regions);
 %% analyze behavior
 
 subjects=unique(neuronSubject);
@@ -468,6 +483,25 @@ for os=1:2
     text(5,0,sprintf('p = %g',round(p(1),2,'significant')));
     
 end
+
+subplot(4,3,6)
+hold on
+for subject=1:length(subjects)
+    scatter(mean(anticipatoryLicks{2}(ismember(sessionSubject(includedSessions),subjects(subject)),:),2),mean(anticipatoryLicks{1}(ismember(sessionSubject(includedSessions),subjects(subject)),:),2),18,'filled');
+end
+
+plot([-2 10],[-2 10],':','color','k','linewidth',1);
+axis([-2 10 -2 10])
+xticks([0 5 10]);
+yticks([0 5 10]);
+text(5,1,sprintf('combined'));
+
+data=[mean(anticipatoryLicks{2}(:,:),2);mean(anticipatoryLicks{1}(:,:),2)];
+gl=[zeros(length(data)/2,1);ones(length(data)/2,1)];
+sl=[sessionSubject(includedSessions);sessionSubject(includedSessions)];
+[p,tbl,stats]=anovan(data(:),{gl(:),sl(:)},'varnames',{'cue','subject'},'model','interaction','display','off');
+text(5,0,sprintf('p = %g',round(p(1),2,'significant')));
+
 %% plot example session trials
 figure;
 subplot(5,1,1);
@@ -932,6 +966,7 @@ cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
 cueResp=mean(cspActivity(sel,cueBins),2);
 
 regions={'ALM','MOs','ACA','FRP','PL','ILA','ORB','CP','ACB','DP','TTd','AON','OLF'};
+
 regcolors{1,1}=[1 0.8 0];
 regcolors{2,1}=[0.8 0.8 0.6];
 regcolors{3,1}=[0.9 0.5 0.2];
@@ -996,6 +1031,175 @@ for cue=1:3
     
     
     
+end
+
+%% plot heatmaps of 3 main trial types PL only
+map=redblue(256);
+figure;
+colormap(map);
+neuronRegionOlf=neuronRegionAdj;
+neuronRegionOlf(ismember(neuronRegionAdj,{'EPd','PIR'}))={'OLF'};
+sel=ismember(neuronRegionOlf,'PL');
+
+%heatmaps
+cspActivity=dffPSTH3{1,1}; %get the firing rates of neurons of interest
+cueWindow=[0 1.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+cueResp=mean(cspActivity(sel,cueBins),2);
+% [~,cueResp]=max(abs(cspActivity(sel,cueBins)),[],2);
+% cueResp=-cueResp;
+
+sortcrit=[ones(sum(sel),1) cueResp];
+[~,sortOrder]=sortrows(sortcrit,[1 2]);
+
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+
+plotWindow=[-0.5 6];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+titles={'CS+       ','CS50      ','CS-     '};
+sets={'set1','set2'};
+pn=0;
+for cue=1:3
+    for os=1:length(sets)
+        sn=sets{os};
+        
+        activity = dffPSTH3{cue,os}(sel,:);
+        activity=activity(sortOrder,:);
+        pn=pn+1;
+        subplot(1,6,pn);
+        hold on;
+        
+        imagesc(binTimes(plotBins),[1 sum(sel)],activity(:,plotBins),[-3 3]);%[min(min(cspActivity)) max(max(cspActivity))]);
+        ylim([0.5 sum(sel)+0.5])
+        plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
+        plot([2.5 2.5],[0.5 sum(sel)+0.5],':','color','k','linewidth',0.25);
+        set(gca,'ytick',[]);
+        
+        %colorbar;
+        title(titles{cue});
+        if pn==1
+            xlabel('seconds from odor onset');
+        end
+    end
+    
+    
+    
+end
+
+%% PCA and correlations for PL only
+
+figure;
+
+plotWindow=[-0.5 6];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+sel=ismember(neuronRegionOlf,'PL');
+activity=[];
+for cue=1:3
+    for os=1:2   
+        activity = [activity dffPSTH3{cue,os}(sel,plotBins)];
+    end
+end
+activity=activity./max(abs(activity),[],2);
+[coeff,score,~,~,explained]=pca(activity');
+specs={'-','--'};
+for comp=1:5
+    cond=0;
+    if explained(comp)>5
+    subplot(2,2,comp)
+    
+    hold on
+    for cue=1:3
+        for os=1:2
+            cond=cond+1;
+            plot(binTimes(plotBins),-score((cond-1)*sum(plotBins)+1:cond*sum(plotBins),comp),specs{os},'color',colors{cue},'linewidth',1);
+        end
+    end
+    ylabel(sprintf('#%g (%g%%)',comp,round(explained(comp),1)));
+    yticks([]);
+    if comp==1 xticks([0 2 4 6]); end
+    if comp>1 xticks([]); end
+    
+%     plot([0 0],[min(score(:,comp)) max(score(:,comp))],':','color','k','linewidth',0.5);
+%     plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+    xlim(plotWindow);
+    
+    patch([0 0 stimDuration stimDuration],[-1 1 1 -1],[0.6 0.3 0],'edgecolor','none');alpha(0.3);
+    plot([rewOnset rewOnset],[-1 1],'color',[0 0.6 0.3]);    
+    end
+
+end
+
+%% plot mean activity for each region
+figure;
+
+plotWindow=[-0.5 2.5];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+xvals=binTimes(plotBins);
+
+neuronRegionOlf=neuronRegionAdj;
+neuronRegionOlf(ismember(neuronRegionAdj,{'EPd','PIR'}))={'OLF'};
+division=neuronRegionOlf;
+
+regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
+regcolors{1,1}=[1 0.8 0];
+regcolors{2,1}=[0.6 0.2 0.6];
+regcolors{3,1}=[1 0.6 1];
+regcolors{4,1}=[0.3 0.7 0.5];
+
+
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+directions=[1 -1];
+specs={'-','--'};
+diractivity = mean(cat(3,dffPSTH6{(1-1)*2+2,1},dffPSTH6{(1-1)*2+1,2}),3);
+direction=sign(max(diractivity,[],2)-abs(min(diractivity,[],2)));
+for reg=1:length(regions)
+    regsel=ismember(division,regions(reg));
+    for d=1:2
+        subplot(2,length(regions),reg+(d-1)*length(regions));
+        
+        hold on;
+        for cue=1:3
+            for os=1:2
+                
+                activity = dffPSTH6{(cue-1)*2+os,os};
+                
+                %get values
+                psth=nanmean(activity(regsel&direction==directions(d),plotBins));
+                sem=nanste(activity(regsel&direction==directions(d),plotBins),1); %calculate standard error of the mean
+                up=psth+sem;
+                down=psth-sem;
+                
+                %plotting
+                plot(binTimes(plotBins),psth,specs{os},'Color',colors{cue,1},'linewidth',0.75);
+                %patch([xvals,xvals(end:-1:1)],[up,down(end:-1:1)],regcolors{reg,1},'EdgeColor','none');alpha(0.2);
+                
+                
+            end
+            
+        end
+        
+        if d==1 text(0.1,1.5,num2str(sum(regsel&direction==directions(d)))); end
+        if d==2 text(0.1,-0.45,num2str(sum(regsel&direction==directions(d)))); end
+        if reg==1 & d==2
+            xlabel('seconds from odor onset');
+            ylabel('z-score');
+        else
+            xticks([]);
+        end
+        
+        if reg>1 yticks([]); end
+        plot([0 0],[-1 2],'color',colors{condition},'linewidth',0.75);
+        plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+        if d==1 axis([plotWindow -0.25 2]); end
+        if d==2 axis([plotWindow -0.6 0.2]); end
+    end
+
+
+
 end
 
 
@@ -1087,6 +1291,7 @@ category(predictive & rewardK & cueK,1)=6;
 category(predictive & behavior & cueK,1)=2;
 category(predictive & behavior & rewardK,1)=4;
 category(predictive & behavior & cueK & rewardK,1)=7;
+%category(sum(improvement(:,2:4)>0.05,2)>0)=8;
 
 %region
 neuronRegionOlf=neuronRegionAdj;
@@ -1277,9 +1482,12 @@ for ct=1:3
     
     barData=barData(:,regInd);
     b=bar(barData','stacked');
-
+    %b(3).FaceColor=[0.4 0 0.5]; %odor
+    %b(2).FaceColor=[0.7 0.7 0.7]; %meaning
     b(1).FaceColor=catcolors{ct}; %value
-
+    %b(4).FaceColor=[0 0 0.2]; %odor
+    % b(5).FaceColor=[0.9 0.2 0];
+    %b(3).FaceColor=[1 1 1];
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -1351,7 +1559,12 @@ for ct=1:3
     
     barData=barData(:,reggrps);
     b=bar(barData','stacked');
+    %b(3).FaceColor=[0.4 0 0.5]; %odor
+    %b(2).FaceColor=[0.7 0.7 0.7]; %meaning
     b(1).FaceColor=catcolors{ct}; %value
+    %b(4).FaceColor=[0 0 0.2]; %odor
+    % b(5).FaceColor=[0.9 0.2 0];
+    %b(3).FaceColor=[1 1 1];
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -1636,7 +1849,7 @@ for condition=1:3
     direction=sign(max(diractivity,[],2)-abs(min(diractivity,[],2)));
     activity = mean(cat(3,dffPSTH6{(condition-1)*2+2,1},dffPSTH6{(condition-1)*2+1,2}),3);
     for d=1:2
-        subplot(2,6,condition+3+(d-1)*6);
+        subplot(4,6,condition+3+(d-1)*6);
         hold on;
         for reg=1:length(cats)
             regsel=ismember(category,cats(reg));
@@ -1670,15 +1883,176 @@ for condition=1:3
         if d==1 axis([plotWindow -0.25 2.25]);yticks(0:1:2); end
         if d==2 axis([plotWindow -1 0.2]);yticks(-1:0.5:0); end
         %if condition==1 legend(regions); end
+        
+        if condition==2
+            
+            for reg=1:3
+                subplot(4,6,reg+3+12+(d-1)*6);
+                hold on;
+                regsel=ismember(category,cats(reg));
+                if cats(reg)==4 regsel=category>3; end
+                
+                for r=1:2
+                    
+                    activity = mean(cat(3,dffPSTH4{r+1,1},dffPSTH4{r+1,2}),3);
+                    %get values
+                    psth=nanmean(activity(regsel&direction==directions(d),plotBins));
+                    sem=nanste(activity(regsel&direction==directions(d),plotBins),1); %calculate standard error of the mean
+                    up=psth+sem;
+                    down=psth-sem;
+                    
+                    %plotting
+                    plot(binTimes(plotBins),psth,'Color',catcolors{reg,1}/r,'linewidth',0.75);
+                    patch([xvals,xvals(end:-1:1)],[up,down(end:-1:1)],catcolors{reg,1}/r,'EdgeColor','none');alpha(0.2);
+                    
+                    
+                end
+                if reg==1 & d==2
+                    xlabel('seconds from odor onset');
+                    ylabel('z-score');
+                else
+                    xticks([]);
+                end
+                
+                if reg>1 yticks([]); end
+                plot([2.5 2.5],[-2 4],'color','k','linewidth',0.75);
+                patch([0 0 stimDuration stimDuration],[-2 4 4 -2],colors{condition},'edgecolor','none');alpha(0.3);
+                plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+                if d==1 axis([plotWindow -0.25 2]);yticks(0:1:2); end
+                if d==2 axis([plotWindow -1 0.2]);yticks(-1:0.5:0); end
+            end
+            
+            
+        end
     end
     
     
     
 end
 
+%% single probe data
+addpath(genpath(fullfile(githubDir, 'spikes'))) %to load .npy files
+probe2plot = 28; %28 %3
+probesel=ismember(neuronProbe,probe2plot);
+
+plotWindow=[-0.5 6];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+msize=25;
+regions={'MOs','ACA','PL','ILA','DP','TTd'};
+regcolors{1,1}=[0.8 0.8 0.6];
+regcolors{2,1}=[0.9 0.5 0.2];
+regcolors{3,1}=[0.6 0.2 0.6];
+regcolors{4,1}=[0.5 0.4 0.7];
+regcolors{5,1}=[0.3 0.7 0.5];
+regcolors{6,1}=[0.1 0.8 0.8];
 
 
+colors={[0 0.4 0.9];... %cue
+    [0.6 0 0.6];...
+    [0.9 0.2 0];... %lick
+    [0.7 0.7 0.7]};
 
+neuronXYZmm=neuronXYZ/1000;
+    
+subplot(1,8,1);
+hold on;
+for ct=1:length(regions)
+    sel=probesel & ismember(neuronRegionOlf,regions(ct));
+    offset=(rand(sum(sel),1)*10-5)/1000;
+    p1=scatter(abs(neuronXYZmm(sel,1))+offset,neuronXYZmm(sel,3)+offset,msize,regcolors{ct},'filled');
+    p1.MarkerFaceAlpha=0.5;
+end
+xlabel('ML');
+ylabel('DV');
+legend(regions,'location','se');
+title(sprintf('Insertion %d', probe));    
+axis([200 1200 -4500 -1700]/1000);
+
+NN=0;
+NP=0;
+clusterTimes={};
+clusterRegion={};
+clusterDepth=[];
+for session=1:sessionNumber
+    sessionFolder=fullfile(direc,sessionSubject{session},sessionDate{session});
+    folders=dir(sessionFolder);
+    probeFolderIDs = find(arrayfun(@(x) strcmp('p',folders(x).name(1)),1:length(folders)));
+    if isreal(probeFolderIDs)
+        for probe=1:length(probeFolderIDs)
+            probeFolder=fullfile(sessionFolder,folders(probeFolderIDs(probe)).name);
+            shankDir=dir(probeFolder);
+            probeNeur=0;
+            NP=NP+1;
+            if NP==probe2plot
+                entryName={};
+                entryNameWithShank={};
+                for entry=1:length(shankDir)
+                    entryName{entry,1}=shankDir(entry).name(1:min([length(shankDir(entry).name) 5]));
+                    entryNameWithShank{entry,1}=shankDir(entry).name(1:min([length(shankDir(entry).name) 6]));
+                end
+                shanks=sum(strcmp(entryName,'shank'));
+                shankList=[];
+                for entry=1:length(shankDir)
+                    if length(entryNameWithShank{entry})>5
+                        shankList=cat(1,shankList,str2num(entryNameWithShank{entry}(6)));
+                    end
+                end
+                shankN=NaN(shanks,1);
+                for shank=1:shanks
+
+                    shankFolder=fullfile(probeFolder,append('shank',num2str(shankList(shank))));
+                    clusterNames=readNPY(fullfile(shankFolder,'clusters.names.npy'));
+                    incClusters=clusterNames(readNPY(fullfile(shankFolder,'clusters.passedQualityControl.npy')));
+                    channelLocationsID = readNPY(fullfile(shankFolder,'channels.CCFregionIDs.npy'));
+                    channelXYZ = readNPY(fullfile(shankFolder,'channels.ML_AP_DV_fromBregma.npy'));
+                    channelLocations = textscan(fopen(fullfile(shankFolder,'channels.CCFregions.txt')),'%s');
+                    fclose('all');
+                    channelLocations = channelLocations{1};
+                    spikeTimes = readNPY(fullfile(shankFolder,'spikes.times.npy'));
+                    spikeClusters = readNPY(fullfile(shankFolder,'spikes.clusterNames.npy'));
+                    clusterChannel = readNPY(fullfile(shankFolder,'clusters.channels.npy'));
+                    shankN(shank)=length(incClusters);
+
+                    %get clusters
+                    for clus=1:length(incClusters)
+                        cluster = incClusters(clus);
+                        regionName = channelLocations{clusterChannel(clusterNames==cluster)};
+                        charOnly = regexp(regionName,'[c-zA-Z]','match');
+                        noNums=cat(2,charOnly{:});
+                        if sum(strcmp(regions,noNums(1:min([3 length(noNums)]))))==1
+                            NN=NN+1;
+                            clusterTimes{NN,1} = double(spikeTimes(spikeClusters==cluster))/30000;
+                            clusterRegion{NN,1} = noNums(1:min([3 length(noNums)]));
+                            clusterDepth(NN,1)=channelXYZ(clusterChannel(clusterNames==cluster),3);
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+regions={'PL'};
+regcolors{1,1}=[0.6 0.2 0.6];
+
+subplot(1,5,3:5)
+hold on
+NN=0;
+[ds,depthSorted]=sort(clusterDepth,'descend');
+for reg=1:length(regions)
+    for cluster=1:length(clusterTimes)
+        clusterSorted=depthSorted(cluster);
+        if strcmp(clusterRegion{clusterSorted},regions{reg})            
+            [xx,yy]=rasterize(clusterTimes{clusterSorted});
+            plot(xx,yy+NN,'color',regcolors{reg},'linewidth',0.25);
+            NN=NN+1;
+        end
+    end
+end
+set(gca,'ydir','rev');
+xlim([850 1000]);
+xticks([850 910]);
+ylim([0 NN]);
 %% region comparisons of cue, lick, and both cells for striatum and pfc
 figure;
 regions={'ACA','FRP','PL','ILA','ORB','CP','ACB'};
@@ -1712,7 +2086,12 @@ for ct=1:3
     
     barData=barData(:,regInd);
     b=bar(barData','stacked');
+    %b(3).FaceColor=[0.4 0 0.5]; %odor
+    %b(2).FaceColor=[0.7 0.7 0.7]; %meaning
     b(1).FaceColor=catcolors{ct}; %value
+    %b(4).FaceColor=[0 0 0.2]; %odor
+    % b(5).FaceColor=[0.9 0.2 0];
+    %b(3).FaceColor=[1 1 1];
     upperCI=[];
     lowerCI=[];
     estmean=[];
@@ -1784,7 +2163,12 @@ for ct=1:3
     
     barData=barData(:,reggrps);
     b=bar(barData','stacked');
+    %b(3).FaceColor=[0.4 0 0.5]; %odor
+    %b(2).FaceColor=[0.7 0.7 0.7]; %meaning
     b(1).FaceColor=catcolors{ct}; %value
+    %b(4).FaceColor=[0 0 0.2]; %odor
+    % b(5).FaceColor=[0.9 0.2 0];
+    %b(3).FaceColor=[1 1 1];
     upperCI=[];
     lowerCI=[];
     estmean=[];

@@ -691,23 +691,6 @@ lambdaVal=NaN(length(roiMouse),1);
 lambda=[0.001 0.005 0.01 0.02 0.05 0.1 0.2 0.5];
 binsPerCue=diff(windows{1})/binSize;
 
-%permute all possible combinations of odors for meaning shuffle
-allodors=1:6;
-perms6=NaN(90,6);
-first2=nchoosek(allodors,2);
-perm=0;
-for f2=1:length(first2)
-    remaining=allodors(~ismember(allodors,first2(f2,:)));
-    next2=nchoosek(remaining,2);
-    for n2=1:length(next2)
-        last=remaining(~ismember(remaining,next2(n2,:)));
-        perm=perm+1;
-        perms6(perm,:)=[first2(f2,:) next2(n2,:) last];
-    end
-end
-perms6all=perms6; 
-varExpValueSh=NaN(totalNeurons,4+length(perms6all));
-
 NN=0;
 for mouse=1:length(mice)
     session1=mouse;
@@ -727,43 +710,7 @@ for mouse=1:length(mice)
         As{sub} = At;
         rAs{sub} = At * bR(:,1:components);
     end
-    
-    %get original cue order for shuffle
-    firstBins=[];
-    cueOrder=[1 3 5 2 4 6];
-    for cue=1:6
-        firstBins{cue}=find(A(:,1+(cue-1)*binsPerCue));
-        firstBins{cue}=[firstBins{cue} ones(length(firstBins{cue}),1)*cueOrder(cue)];
-    end
-    alltrials=cat(1,firstBins{:});
-    [sortedtrials,ordered]=sort(alltrials(:,1));
-    originalOrder=alltrials(ordered,2);
-    combinedValues=[trialValues{mouse,1};trialValues{mouse,2}];
-    
-    %make new shuffled predictor matrices
-    A3Sh={};
-    for perm=1:length(perms6all)+1
-        if perm>size(perms6all,1)
-            newValue=ones(length(alltrials),1);
-        else
-            newOrder=NaN(length(alltrials),1);
-            for cue=1:6
-                newOrder(originalOrder==cue)=perms6all(perm,cue);
-            end
-            
-            newValue=NaN(length(alltrials),1);
-            for cue=1:6
-                originalValues=combinedValues(originalOrder==cue);
-                newValue(newOrder==cue)=mean(originalValues(randsample(sum(originalOrder==cue),sum(newOrder==cue),'true')));
-            end
-        end
-        
-        A3Sh{perm}=XallC3{mouse};
-        for bin=1:binsPerCue
-            A3Sh{perm}(sortedtrials(:,1)-1+bin,bin)=newValue;
-        end
-    end
-    
+
     for roi=1:size(Yall{session1},2)
         NN=NN+1;
         y1=Yall{session1}(:,roi);
@@ -775,9 +722,7 @@ for mouse=1:length(mice)
         for fold=1:folds
             train=trains{fold};
             test=train==0;
-            %                 fit = glmnet(rA(train,:), y(train), 'gaussian', opts);
-            %                 this_a = glmnetCoef(fit, lambda);
-            %                 fitK = this_a(2:end);
+
             fitK=lassoglm(rA(train,:),y(train),'normal','alpha',0.5,'lambda',lambda);
             kernel=bR(:,1:components)*fitK;
             predLam(test,:)=A(test,:)*kernel;
@@ -812,54 +757,12 @@ for mouse=1:length(mice)
             end
             predF{NN,1+sub}=pred;
             varExp(NN,1+sub) = 1- var(y-pred)/var(y);
-            
-%             %variance over time
-%             for tb=1:binsPerTrial
-%                 tbsel=tb:binsPerTrial:length(y);
-%                 varExpT.(sn){NN,1+sub}(tb)=1- var(y(tbsel)-pred(tbsel))/var(y(tbsel));
-%             end
+
         end
         
+
         
-        
-        %models with alternate cue
-        %value instead of cue identitiy
-        A3 = XallC3{mouse};
-        rA3 = A3 * bR3(:,1:valueComponents);
-        pred=NaN(size(y,1),1);
-        for fold=1:folds
-            train=trains{fold};
-            test=train==0;
-            fitK=lassoglm(rA3(train,:),y(train),'normal','alpha',0.5,'lambda',thisLambda);
-            kernel=bR3(:,1:valueComponents)*fitK;
-            pred(test)=A3(test,:)*kernel;
-        end
-        varExp(NN,3+sub) = 1- var(y-pred)/var(y);
-        
-        if varExp(NN,1)-varExp(NN,2)>0.02
-        
-            for perm=1:size(perms6all,1)+1
-                
-                rA3 = A3Sh{perm} * bR3(:,1:valueComponents);
-                trains = getfolds(rA3,folds,binsPerTrial);
-                
-                %         if ismember(perm,topModels)
-                %            display(perms6all(perm,:));display([combinedValues(1:10) newValue(1:10)]);
-                %         end
-                
-                
-                pred=NaN(size(y,1),1);
-                for fold=1:folds
-                    train=trains{fold};
-                    test=train==0;
-                    fitK=lassoglm(rA3(train,:),y(train),'normal','alpha',0.5,'lambda',thisLambda);
-                    kernel=bR3(:,1:valueComponents)*fitK;
-                    pred(test)=A3Sh{perm}(test,:)*kernel;
-                end
-                varExpValueSh(NN,3+perm) = 1- var(y-pred)/var(y);
-            end
-        
-        end
+
         
     end
     
@@ -868,14 +771,78 @@ for mouse=1:length(mice)
 end
 
 
-varExpValueSh(:,1)=varExp(:,1);
-varExpValueSh(:,2)=varExp(:,2);
-varExpValueSh(:,3)=varExp(:,5);
+%% perform value analysis with a ton of shuffles
+runglm=true;
+%generate all value shuffles
+valueShuffles = [];
+valueVersion = [];
+valueLevels = [1 1 0.5 0.5 0 0;1 1 1 1 0 0;1 1 1 0 0 0;1 1 0 0 0 0;1 0 0 0 0 0;1 1 1 1 1 0;1 1 1 1 1 1];
+for vl=1:size(valueLevels,1)
+allCombos = perms(valueLevels(vl,:));
+allCombos = unique(allCombos,'rows');
+valueShuffles = cat(1,valueShuffles,allCombos);
+valueVersion = cat(1,valueVersion,vl*ones(size(allCombos,1),1));
+end
+valueShuffles=fliplr(valueShuffles);
 
+folds=4;
+NNstart=0;
+varExpValueNew=NaN(totalNeurons,length(valueShuffles));
+%kernels=NaN(totalNeurons,31);
+binsPerCue=diff(windows{1})/binSize;
 
+opts.alpha=0.5;
+glmopts=glmnetSet(opts);
 
+if runglm
+cueOrdering=[1 3 5 2 4 6];
+tic
+for NS=1:length(mice)
+    
+    cueStarts={};
+    for cue=1:6
+        cueStarts{cue,1}(:,1)=find(XallC{NS}(:,(cue-1)*binsPerCue+1));
+        cueStarts{cue,1}(:,2)=cueOrdering(cue)*ones(length(cueStarts{cue,1}),1);
+    end
+    
+    sortedStarts=sortrows(cat(1,cueStarts{:}));
+    cueOrder=sortedStarts(:,2);
+    
+    A = XallC{NS}(:,[1:binsPerCue size(XallC{NS},2)-1:size(XallC{NS},2)]);
+    trains = getfolds(A,folds,binsPerTrial);
+    for s=1:length(valueShuffles)
+        for c=1:length(cueOrder)
+            cueValue=valueShuffles(s,cueOrder(c));
+            dm=cueValue*eye(binsPerCue);
+            A(c*binsPerTrial-binsPerCue+1:c*binsPerTrial,1:binsPerCue)=dm;
+        end
+        NN=NNstart;
+        for neuron=1:size(Yall{NS},2)
+            NN=NN+1;
+            y=YallC{NS}(:,neuron);
+            %cross-validated variance explained
+            pred=NaN(size(y,1),1);
+            for fold=1:folds
+                train=trains{fold};
+                test=train==0;
+                %kernel=lassoglm(A(train,:),y(train),'normal','alpha',0.5,'lambda',thisLambda);
+                fit = glmnet(A(train,:),y(train),[],glmopts);
+                prediction = glmnetPredict(fit,A(test,:));
+                pred(test)=prediction(:,end);
+            end
+            varExpValueNew(NN,s) = 1- var(y-pred)/var(y);
+%             kernel = fit.beta(:,end);
+%             if s==1 kernels(NN,:)=kernel; end
+        end           
+    end
+    NNstart=NN;
+    fprintf('Mouse #%d \n',NS);
+end
+toc
 
-%% value coding analysis 90 with untuned
+end
+
+%% value coding analysis
 improvCutoff=0.02;
 overallCutoff=0.02;
 improvement=varExp(:,1)-varExp;
@@ -886,166 +853,131 @@ behavior = improvement(:,3)>improvCutoff; %num licks or lick rate
 cueK = improvement(:,2)>improvCutoff; %if best model is at least cutoff better than no cue kernels
 
 totalCueVariance=varExp(:,1)-varExp(:,2); %best model compared to no cue model
-valueImp=varExp(:,1)-varExpValueSh; %how much better the best model is than value, shuffles, and one kernel
+valueImp=varExp(:,1)-varExpValueNew; %how much better the best model is than value, shuffles, and one kernel
 %correct it so you can't be worse than no cues at all (should I do this?)
 for n=1:length(valueImp)
     valueImp(n,valueImp(n,:)>totalCueVariance(n))=totalCueVariance(n);
 end
 
-%value specific variance
-%whatever is accounted for by value kernel
-cueVariance=totalCueVariance - valueImp(:,[4:end]);
-[~,bestModel]=max(cueVariance,[],2);
-bestModel(isnan(cueVariance(:,1)))=NaN;
+includedModels = 1:length(valueShuffles);
+%includedModels = [1:90 181:length(valueShuffles)];
+%includedModels = [1:length(valueShuffles)];
+shuffleLabels = cell(length(includedModels),1);
+for sl=1:length(includedModels)
+    m=includedModels(sl);
+    shuffleLabels{sl} = sprintf('%g,%g,%g,%g,%g,%g',valueShuffles(m,1),valueShuffles(m,2),valueShuffles(m,3),valueShuffles(m,4),valueShuffles(m,5),valueShuffles(m,6));
+end
+[~,bestModel]=max(varExpValueNew(:,includedModels),[],2);
+% [~,bestModel]=max(varExpValueNew,[],2);
+% bestModel(bestModel>90)=bestModel(bestModel>90)-90;
+totalModels = length(includedModels);
 
 figure;
 
-cueNames={'+','+','50','50','-','-'};
-odorValues=[0.5 0.5 0.37 0.37 0.05 0.05];
-vnames={};
-shuffVals=NaN(90,6);
-for n=1:length(perms6all)
-    vnames{n,1}=append(cueNames{perms6all(n,:)==1},'/',cueNames{perms6all(n,:)==2},', ',cueNames{perms6all(n,:)==3},'/',cueNames{perms6all(n,:)==4},', ',cueNames{perms6all(n,:)==5},'/',cueNames{perms6all(n,:)==6});
-    for odor=1:6
-        shuffVals(n,odor)=odorValues(perms6all(n,:)==odor);
-    end
-end
+corrWVal=corrcoef(valueShuffles(includedModels,:)');
+corrWVal(isnan(corrWVal))=0;
+[valCorr,valRank] = sort(corrWVal(:,1),'descend');
+[~,mdlPosition] = sort(valRank);
 
-subplot(3,1,1);
+subplot(5,1,1);
 hold on
-frequency=histcounts(bestModel(cueK&~behavior&~isnan(bestModel)),0.5:1:91.5,'normalization','probability');
-outliers=frequency>0.05;
-topModels=find(outliers);
-b=bar([1:max(bestModel)-1 max(bestModel)+1],frequency,'facecolor',[0 0.2 0.4],'linewidth',0.01);
+frequency=histcounts(bestModel(cueK&~behavior&~isnan(bestModel)),0.5:1:totalModels+0.5,'normalization','probability');
+%b=bar(1:max(bestModel),frequency,'facecolor',[0 0.2 0.4],'linewidth',0.01);
+b=bar(mdlPosition,frequency,'facecolor',[0 0.2 0.4],'linewidth',0.01);
+
 b.FaceColor='flat';
-for e=1:length(topModels)
-b.CData(topModels(e),:)=[0.7 0 1]; %trial type
+for e=2:17
+b.CData(e,:)=[0.7 0 1]; %trial type
 end
 b.CData(1,:)=[0 0.7 1]; %value
-b.CData(end,:)=[0.6 0.6 0.6]; %non-specific
-
-
-
+b.CData(mdlPosition(end),:)=[0.6 0.6 0.6]; %non-specific
 ylabel('fraction of cue cells');
 
-chance=1/90 * sum(bestModel(cueK&~behavior&~isnan(bestModel))<91)/sum(cueK&~behavior&~isnan(bestModel));
-plot([0 91],[chance chance],':','color','k','linewidth',0.5);
-xlim([0 93]);
-ylim([0 0.3]);
-xticks(topModels(1:end-1));
+chance=1/totalModels;
+plot([0 totalModels+1],[chance chance],':','color','k','linewidth',0.5);
+xlim([0 totalModels+1]);
+ylim([0 0.2]);
+%xticks(mdlPosition(topModels(1:end-1)));
+xticks([]);
 yticks(0:0.1:0.3);
-%xtickangle(45);
-xticklabels(vnames(outliers(1:end-1)));
-xtickangle(45);
+xlabel('cue coding models, sorted by similarity to value model');
+
+subplot(4,5,6);
+hold on
+scatter(valCorr(2:17,1),frequency(valRank(2:17)),24,[0.7 0 1],'filled');
+scatter(valCorr(1,1),frequency(valRank(1)),24,[0 0.7 1],'filled');
+scatter(valCorr(18:end,1),frequency(valRank(18:end)),24,[0 0.2 0.4],'filled');
+scatter(valCorr(mdlPosition(end),1),frequency(end),24,[0.6 0.6 0.6],'filled');
+plot([-1 1],[1/length(includedModels) 1/length(includedModels)],':','color','k','linewidth',0.5);
+ylim([0 0.2]);
+ylabel('fraction of cue cells');
+xlabel('correlation with value model');
+yticks(0:0.1:0.3);
 
 category=9*ones(length(improvement),1);
-category(cueK&~behavior)=8; %cue neurons
-%categorize neurons by their best model if it's in the top models
-for bm=1:length(topModels)
-category(cueK&~behavior&bestModel==topModels(bm))=bm; %cue, odor
-end
+category(cueK&~behavior)=4; %cue neurons, other odor coding schemes
+category(cueK&~behavior&bestModel==1)=1; %value
+category(cueK&~behavior&ismember(bestModel,valRank(2:17)))=2; %value like
+category(cueK&~behavior&bestModel==max(bestModel))=3; %untuned
 
+% visual depiction of shuffles
+colormap('summer');
+subplot(5,1,4);
+imagesc(1:length(includedModels),1:6,valueShuffles(includedModels,:)',[0 1]);
+xticks([]);
+yticks(1:6);
+yticklabels({'CS+','CS+','CS50','CS50','CS-','CS-'});
+title('Value assigned to each odor in each shuffle');
+colorbar;
 
-%% activity of cue cell types and correlations
+% visual depiction of shuffles, reordered by correlation
+subplot(5,1,5);
+includedShuffles = valueShuffles(includedModels,:)';
+
+imagesc(1:length(includedModels),1:6,includedShuffles(:,valRank),[0 1]);
+xticks([]);
+yticks(1:6);
+yticklabels({'CS+','CS+','CS50','CS50','CS-','CS-'});
+title('Value assigned to each odor in each shuffle, ordered by similarity to value');
+colorbar;
+
+%% activity of cue cell types
 figure;
 map=redblue(256);
-CL=[0 1];
+
 cueWindow=[0 2.5];
 cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
-
-cueCorrMatrix=NaN(12,12,totalNeurons);
-cueCorrSets=NaN(6,6,totalNeurons);
-setCorr=NaN(totalNeurons,3);
-
-for NN=1:totalNeurons
-    cueVector=NaN(sum(cueBins),12);
-    cue3Vector=NaN(sum(cueBins)*3,6);
-    v=0;
-    u=0;
-    for os=1:2
-        for condition=1:6
-            v=v+1;
-            cueVector(:,v)=dffPSTH6{condition,os}(NN,cueBins);
-        end
-        
-    end
-    %cueVector=cueVector-mean(cueVector,2);
-    corrmat=corrcoef(cueVector);
-    
-    cueCorrMatrix(:,:,NN)=corrmat;
-end
-
 
 %heatmaps
 plotWindow=[-0.5 2.5];
 plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
 
-sortWindow=[0 1.5];
+sortWindow=[0 2.5];
 sortBins=binTimes>=sortWindow(1) & binTimes<=sortWindow(2);
-
-
 
 colors{1,1}=[0.1 0.6 0.2];
 colors{2,1}=[0.4 0.1 0.4];
 colors{3,1}=[0.3 0.3 0.3];
 
-
-for ct=1
- sel=category==ct;
-thisActivity=dffPSTH3{1,1}(sel,:);
-cueResp=mean(thisActivity(:,sortBins),2);
-[~,sortOrder]=sort(cueResp);
 pn=0;
 activity=[];
-for cue=1:3
-    for os=1:2
-        
-        pn=pn+1;
-        
-        ax(1)=subplot(2,20,20+(ct-1)*6+pn);
-        colormap(ax(1),map);
-        hold on;
-        
-        
-        activity = dffPSTH3{cue,os}(sel,:);
-        activity = activity(sortOrder,:);
-        
-
-        
-        imagesc(binTimes(plotBins),[1 size(activity,1)],activity(:,plotBins),[-5 5]);%[min(min(cspActivity)) max(max(cspActivity))]);
-        ylim([0.5 size(activity,1)+0.5])
-        plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
-        set(gca,'ytick',[]);
-        %if pn==1 ylabel('selective odor'); end
-        if pn==1 xlabel('seconds from cue'); end
-        if pn>1 xticks([]); end
-        
-
-        
-    end
-    
-    
-    
-end
-end
-
-
-
-pn=0;
-activity=[];
-sel=ismember(category,2:6);
-thisActivity=dffPSTH3{1,1}(sel,:);
+thisActivity=dffPSTH3{1,1};
 cueResp=mean(thisActivity(:,sortBins),2);
+cats={1,2,3};
 
-regionCodeOpp=8-category;
-sortcrit=[regionCodeOpp(sel) cueResp];
+regionCodeOpp=ones(totalNeurons,1);
+
+for ct=1:length(cats)
+sel=ismember(category,cats{ct});
+sortcrit=[regionCodeOpp(sel) cueResp(sel)];
 [~,sortOrder]=sortrows(sortcrit,[1 2]);
+pn=0;
 for cue=1:3
     for os=1:2
         
         pn=pn+1;
         
-        ax(1)=subplot(2,20,30+(ct-1)*6+pn);
+        ax(1)=subplot(3,15,(ct-1)*15+pn);
         colormap(ax(1),map);
         hold on;
         
@@ -1055,11 +987,11 @@ for cue=1:3
         
 
         
-        imagesc(binTimes(plotBins),[1 size(activity,1)],activity(:,plotBins),[-5 5]);%[min(min(cspActivity)) max(max(cspActivity))]);
+        imagesc(binTimes(plotBins),[1 size(activity,1)],activity(:,plotBins),[-3 3]);%[min(min(cspActivity)) max(max(cspActivity))]);
         ylim([0.5 size(activity,1)+0.5])
         plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
         set(gca,'ytick',[]);
-        %if pn==1 ylabel('selective odor'); end
+        if pn==1 ylabel(sprintf('n=%d',sum(sel))); end
         if pn==1 xlabel('seconds from cue'); end
         if pn>1 xticks([]); end
         
@@ -1071,61 +1003,59 @@ for cue=1:3
     
 end
 
-
-titles={vnames{outliers(1:end-1)},'untuned','odor'};
-
-for ct=1:7
-ax(2)=subplot(4,7,7+ct);
-sel=category==ct;
-imagesc(nanmean(cueCorrMatrix(:,:,sel),3),CL);
-%title(titles(ct));
-colormap(ax(2),'bone');
-xticks([]);
-yticks([]);
-end
-
-plotWindow=[-0.5 2.5];
-plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
-cn=0;
-for ct=1:7
-sel=category==ct;
-if sum(sel)>0
-    cn=cn+1;
-activity=[];
-for cue=1:3
-    for os=1:2   
-        activity = [activity dffPSTH3{cue,os}(sel,plotBins)];
-    end
-end
-activity=activity./max(abs(activity),[],2);
-[coeff,score,~,~,explained]=pca(activity');
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+directions=[1 -1];
 specs={'-','--'};
-for comp=1
-    cond=0;
-    if explained(comp)>5
-    subplot(4,7,ct)
-    
-    hold on
-    for cue=1:3
-        for os=1:2
-            cond=cond+1;
-            plot(binTimes(plotBins),score((cond-1)*sum(plotBins)+1:cond*sum(plotBins),comp),specs{os},'color',colors{cue},'linewidth',1);
-        end
-    end
-    ylabel(sprintf('#%g (%g%%)',comp,round(explained(comp),1)));
-    yticks([]);
-    xticks([0 2]);
-    if comp==1 title(titles{cn}); end
-    
-%     plot([0 0],[min(score(:,comp)) max(score(:,comp))],':','color','k','linewidth',0.5);
-%     plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
-    
-    end
-    xlim(cueWindow);
-end
-end
-end
+diractivity = mean(cat(3,dffPSTH6{(1-1)*2+2,1}(:,plotBins),dffPSTH6{(1-1)*2+1,2}(:,plotBins)),3);
+direction=sign(max(diractivity,[],2)-abs(min(diractivity,[],2)));
 
+    for d=1:2
+        subplot(6,3,3+(ct-1)*6+(d-1)*3);
+        
+        hold on;
+        for cue=1:3
+            for os=1:2
+                
+                activity = dffPSTH6{(cue-1)*2+os,os};
+                
+                %get values
+                psth=nanmean(activity(sel&direction==directions(d),plotBins));
+                sem=nanste(activity(sel&direction==directions(d),plotBins),1); %calculate standard error of the mean
+                up=psth+sem;
+                down=psth-sem;
+                
+                %plotting
+                plot(binTimes(plotBins),psth,specs{os},'Color',colors{cue,1},'linewidth',0.75);
+                %patch([xvals,xvals(end:-1:1)],[up,down(end:-1:1)],regcolors{reg,1},'EdgeColor','none');alpha(0.2);
+                
+                
+            end
+            
+        end
+        
+        if d==1 text(0.1,1.5,num2str(sum(sel&direction==directions(d)))); end
+        if d==2 text(0.1,-0.45,num2str(sum(sel&direction==directions(d)))); end
+        if d==2
+            xlabel('seconds from odor onset');
+            ylabel('z-score');
+        else
+            xticks([]);
+        end
+        
+        %if reg>1 yticks([]); end
+        plot([0 0],[-1 5],'color','k','linewidth',0.75);
+        plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+        if d==1 & ct==1 axis([plotWindow -0.25 5]); end
+        if d==1 & ct==2 axis([plotWindow -0.25 5]); end
+        if d==2 axis([plotWindow -0.75 0.5]); end
+    end
+
+
+
+
+end
 %% remove doubles (from merging) and edge of FOV rois
 function iscell = processROIs(iscell,stat,F)
 ROIpixels={};

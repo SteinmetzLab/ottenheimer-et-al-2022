@@ -1148,6 +1148,122 @@ for roi=1:length(roiIDs)
     yticks([]);
 end
 xlabel('seconds from odor onset');
+%% correlating activity from days 1 to 2 to 3
+
+plotBins=binTimes>=analysisWindow(1) & binTimes<=analysisWindow(2);
+
+map=redblue(256);
+figure;
+colormap(map);
+
+activity1 = cat(2,dffPSTH3.o1d1{:,3});
+activity1 = activity1(trackedROIids{1}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{1}(trackedROIids{1}>0));
+activity1=activity1(idOrder,:);
+
+activity2 = cat(2,dffPSTH3.o1d2{:,3});
+activity2 = activity2(trackedROIids{2}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{2}(trackedROIids{2}>0));
+activity2=activity2(idOrder,:);
+
+activity3 = cat(2,dffPSTH3.o1d3{:,3});
+activity3 = activity3(trackedROIids{3}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{3}(trackedROIids{3}>0));
+activity3=activity3(idOrder,:);
+
+numneur=size(activity1,1);
+[~,randomize]=sort(activity2(:,2));
+
+corr12=corrcoef([activity1' activity2']);
+corr12=corr12(numneur+1:end,1:numneur);
+corr12sh=corrcoef([activity1' activity2(randomize,:)']);
+corr12sh=corr12sh(numneur+1:end,1:numneur);
+percentile=NaN(numneur,1);
+percentileSh=NaN(numneur,1);
+for n=1:numneur
+    self=corr12(n,n);
+    other=corr12(n,:);other(n)=[];
+    percentile(n,1)=sum(other<=self)/numneur;
+    
+    self=corr12sh(n,n);
+    other=corr12sh(n,:);other(n)=[];
+    percentileSh(n,1)=sum(other<=self)/numneur;    
+end
+
+subplot(1,3,1)
+hold on
+[y,x]=ecdf(percentileSh*100);
+plot(x,y,'color',[0.6 0.6 0.6],'linewidth',1);
+[y,x]=ecdf(percentile*100);
+plot(x,y,'color','k','linewidth',1);
+xlabel('Percentile');
+ylabel('Cumulative fraction');
+title('Correlation rank');
+legend('Shuffle','True');
+
+
+subplot(1,3,3)
+hold on
+mouseRank=NaN(length(mice),2);
+for mouse=1:length(mice)
+    mouseSel=strcmp(trackedMouse,mice(mouse));
+    mouseRank(mouse,1)=median(percentile(mouseSel));
+    mouseRank(mouse,2)=median(percentileSh(mouseSel));
+end
+
+scatter(rand(length(mice),1)/2+0.5,mouseRank(:,1),24,'k','filled');
+scatter(rand(length(mice),1)/2+0.5,mouseRank(:,2),24,[0.6 0.6 0.6],'filled');
+errorbar(1.25,mean(mouseRank(:,1)),nanste(mouseRank(:,1),1),'o','color','k','linewidth',1);
+errorbar(1.25,mean(mouseRank(:,2)),nanste(mouseRank(:,2),1),'o','color',[0.6 0.6 0.6],'linewidth',1);
+
+corr23=corrcoef([activity2' activity3']);
+corr23=corr23(numneur+1:end,1:numneur);
+corr23sh=corrcoef([activity2(randomize,:)' activity3']);
+corr23sh=corr23sh(numneur+1:end,1:numneur);
+
+percentile=NaN(numneur,1);
+for n=1:numneur
+    self=corr23(n,n);
+    other=corr23(n,:);other(n)=[];
+    percentile(n,1)=sum(other<=self)/numneur;
+    
+    self=corr23sh(n,n);
+    other=corr23sh(n,:);other(n)=[];
+    percentileSh(n,1)=sum(other<=self)/numneur;    
+end
+
+subplot(1,3,2)
+hold on
+[y,x]=ecdf(percentileSh*100);
+plot(x,y,'color',[0.6 0.6 0.6],'linewidth',1);
+[y,x]=ecdf(percentile*100);
+plot(x,y,'color','k','linewidth',1);
+xlabel('Percentile');
+ylabel('Cumulative fraction');
+title('Correlation rank');
+legend('shuffled','real');
+
+subplot(1,3,3)
+hold on
+mouseRank=NaN(length(mice),2);
+for mouse=1:length(mice)
+    mouseSel=strcmp(trackedMouse,mice(mouse));
+    mouseRank(mouse,1)=median(percentile(mouseSel));
+    mouseRank(mouse,2)=median(percentileSh(mouseSel));
+end
+
+scatter(rand(length(mice),1)/2+2.5,mouseRank(:,1),24,'k','filled');
+scatter(rand(length(mice),1)/2+2.5,mouseRank(:,2),24,[0.6 0.6 0.6],'filled');
+errorbar(3.25,mean(mouseRank(:,1)),nanste(mouseRank(:,1),1),'o','color','k','linewidth',1);
+errorbar(3.25,mean(mouseRank(:,2)),nanste(mouseRank(:,2),1),'o','color',[0.6 0.6 0.6],'linewidth',1);
+axis([0 4 0 1]);
+xticks([1 3]);
+yticks([0 0.5 1]);
+xticklabels({'day 1->2','day 2->3'});
+ylabel('Correlation rank');
+
+
+
 %% glm performance across tracked cells
 
 %starter model
@@ -1317,6 +1433,200 @@ gl=cat(1,ones(8,9),2*ones(8,9),3*ones(8,9));
 % c=multcompare(stats,'dimension',[1 2],'ctype','bonferroni');
 
 end
+
+%% plotting activity of CS+ preferring neurons day 1 to 2 to 3
+
+%sort based on category on day 3
+catInc=category{3}(trackedROIids{3}>0);
+[~,idOrder]=sort(trackedROIids{3}(trackedROIids{3}>0));
+catTrack=catInc(idOrder);
+
+plotWindow=[-0.5 2.5];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+xvals=binTimes(plotBins);
+
+%also select peak activity for CS+
+cueWindow = [0 2.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+cspActivity=mean(dffPSTH3.o1d3{1,3}((trackedROIids{3}>0),cueBins),2);
+cueRespP=abs(mean(dffPSTH3.o1d3{1,3}(:,cueBins),2));
+cueRespF=abs(mean(dffPSTH3.o1d3{2,3}(:,cueBins),2));
+cueRespM=abs(mean(dffPSTH3.o1d3{3,3}(:,cueBins),2));
+CSPpref = cueRespP > cueRespF & cueRespP > cueRespM;
+cueInc = CSPpref(trackedROIids{3}>0);
+cueTrack = cueInc(idOrder);
+sel = catTrack==1 & cueTrack;
+
+sessionStage=3;
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+directions=[1 -1];
+specs={'-','--'};
+diractivity = dffPSTH6.o1d3{(1-1)*2+2,1}(:,plotBins);
+direction=sign(max(diractivity,[],2)-abs(min(diractivity,[],2)));
+direction=direction(trackedROIids{3}>0);
+direction=direction(idOrder);
+for session=1:length(sessions)
+    sn=sessions{session};
+    for d=1:2
+        subplot(2,3,(d-1)*3+session);
+        
+        hold on;
+        for cue=1:3
+            
+            if session==3 activity = dffPSTH6.(sn){(cue-1)*2+1}(trackedROIids{session}>0,:);
+            else activity = dffPSTH3.(sn){cue,sessionStage}(trackedROIids{session}>0,:); end
+            
+            [~,idOrder]=sort(trackedROIids{session}(trackedROIids{session}>0));
+            activity=activity(idOrder,:);
+            
+            %get values
+            psth=nanmean(activity(sel&direction==directions(d),plotBins));
+            sem=nanste(activity(sel&direction==directions(d),plotBins),1); %calculate standard error of the mean
+            up=psth+sem;
+            down=psth-sem;
+            
+            %plotting
+            
+            plot(binTimes(plotBins),psth,'Color',colors{cue,1},'linewidth',0.75);
+            patch([xvals,xvals(end:-1:1)],[up,down(end:-1:1)],colors{cue,1},'EdgeColor','none');alpha(0.2);
+            
+            
+        end
+        
+        
+        
+        if d==1 text(0.1,1.5,num2str(sum(sel&direction==directions(d)))); end
+        if d==2 text(0.1,-0.45,num2str(sum(sel&direction==directions(d)))); end
+        if d==2
+            xlabel('seconds from odor onset');
+            ylabel('z-score');
+        else
+            xticks([]);
+        end
+        
+        %if reg>1 yticks([]); end
+        plot([0 0],[-1 5],'color','k','linewidth',0.75);
+        plot(plotWindow,[0 0],':','color','k','linewidth',0.5);
+        if d==1  axis([plotWindow -0.25 4]); end
+        if d==2 axis([plotWindow -0.8 0.4]); yticks([-0.5 0]); end
+    end
+end
+
+
+%% correlating activity from days 1 to 2 to 3 for CS+preferring cue neurons (run immediately after code above)
+
+plotBins=binTimes>=analysisWindow(1) & binTimes<=analysisWindow(2);
+
+map=redblue(256);
+figure;
+colormap(map);
+
+activity1 = cat(2,dffPSTH3.o1d1{:,3});
+activity1 = activity1(trackedROIids{1}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{1}(trackedROIids{1}>0));
+activity1=activity1(idOrder,:);
+
+activity2 = cat(2,dffPSTH3.o1d2{:,3});
+activity2 = activity2(trackedROIids{2}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{2}(trackedROIids{2}>0));
+activity2=activity2(idOrder,:);
+
+activity3 = cat(2,dffPSTH3.o1d3{:,3});
+activity3 = activity3(trackedROIids{3}>0,plotBins);
+[~,idOrder]=sort(trackedROIids{3}(trackedROIids{3}>0));
+activity3=activity3(idOrder,:);
+
+numneur=size(activity1,1);
+[~,randomize]=sort(activity2(:,2));
+
+corr12=corrcoef([activity1' activity2']);
+corr12=corr12(numneur+1:end,1:numneur);
+corr12sh=corrcoef([activity1' activity2(randomize,:)']);
+corr12sh=corr12sh(numneur+1:end,1:numneur);
+percentile=NaN(numneur,1);
+percentileSh=NaN(numneur,1);
+for n=1:numneur
+    self=corr12(n,n);
+    other=corr12(n,:);other(n)=[];
+    percentile(n,1)=sum(other<=self)/numneur;
+    
+    self=corr12sh(n,n);
+    other=corr12sh(n,:);other(n)=[];
+    percentileSh(n,1)=sum(other<=self)/numneur;    
+end
+
+subplot(1,3,1)
+hold on
+[y,x]=ecdf(percentileSh(sel)*100);
+plot(x,y,'color',[0.6 0.6 0.6],'linewidth',1);
+[y,x]=ecdf(percentile(sel)*100);
+plot(x,y,'color','k','linewidth',1);
+xlabel('Percentile');
+ylabel('Cumulative fraction');
+title('Correlation rank');
+legend('Shuffle','True');
+
+subplot(1,3,3)
+hold on
+mouseRank=NaN(length(mice),2);
+for mouse=1:length(mice)
+    mouseSel=strcmp(trackedMouse,mice(mouse))&sel;
+    mouseRank(mouse,1)=median(percentile(mouseSel));
+    mouseRank(mouse,2)=median(percentileSh(mouseSel));
+end
+
+scatter(rand(length(mice),1)/2+0.5,mouseRank(:,1),24,'k','filled');
+scatter(rand(length(mice),1)/2+0.5,mouseRank(:,2),24,[0.6 0.6 0.6],'filled');
+errorbar(1.25,nanmean(mouseRank(:,1)),nanste(mouseRank(:,1),1),'o','color','k','linewidth',1);
+errorbar(1.25,nanmean(mouseRank(:,2)),nanste(mouseRank(:,2),1),'o','color',[0.6 0.6 0.6],'linewidth',1);
+
+corr23=corrcoef([activity2' activity3']);
+corr23=corr23(numneur+1:end,1:numneur);
+corr23sh=corrcoef([activity2(randomize,:)' activity3']);
+corr23sh=corr23sh(numneur+1:end,1:numneur);
+
+percentile=NaN(numneur,1);
+for n=1:numneur
+    self=corr23(n,n);
+    other=corr23(n,:);other(n)=[];
+    percentile(n,1)=sum(other<=self)/numneur;
+    
+    self=corr23sh(n,n);
+    other=corr23sh(n,:);other(n)=[];
+    percentileSh(n,1)=sum(other<=self)/numneur;    
+end
+
+subplot(1,3,2)
+hold on
+[y,x]=ecdf(percentileSh(sel)*100);
+plot(x,y,'color',[0.6 0.6 0.6],'linewidth',1);
+[y,x]=ecdf(percentile(sel)*100);
+plot(x,y,'color','k','linewidth',1);
+xlabel('Percentile');
+ylabel('Cumulative fraction');
+title('Correlation rank');
+legend('shuffled','real');
+
+subplot(1,3,3)
+hold on
+mouseRank=NaN(length(mice),2);
+for mouse=1:length(mice)
+    mouseSel=strcmp(trackedMouse,mice(mouse))&sel;
+    mouseRank(mouse,1)=median(percentile(mouseSel));
+    mouseRank(mouse,2)=median(percentileSh(mouseSel));
+end
+
+scatter(rand(length(mice),1)/2+2.5,mouseRank(:,1),24,'k','filled');
+scatter(rand(length(mice),1)/2+2.5,mouseRank(:,2),24,[0.6 0.6 0.6],'filled');
+errorbar(3.25,nanmean(mouseRank(:,1)),nanste(mouseRank(:,1),1),'o','color','k','linewidth',1);
+errorbar(3.25,nanmean(mouseRank(:,2)),nanste(mouseRank(:,2),1),'o','color',[0.6 0.6 0.6],'linewidth',1);
+axis([0 4 0 1]);
+xticks([1 3]);
+yticks([0 0.5 1]);
+xticklabels({'day 1->2','day 2->3'});
+ylabel('Correlation rank');
 
 
 

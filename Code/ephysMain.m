@@ -1451,19 +1451,26 @@ xticklabels(regionGroupNames(1:3));
 xtickangle(45);
 %% region comparisons of cue, lick, and both cells using generalized linear mixed effects model
 figure;
+pcutoff=0.05/36;
 regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
-reggrps=[1:3];
+reggrps=[2:4];
+neuronGroupAdj = neuronGroup + 1;
+neuronGroupAdj(neuronGroupAdj==5)=1;
 
 allReg=unique(neuronRegionOlf);
 regInd=NaN(length(regions),1);
+order=[9 10 5 2 3 1 7 12 8 11 6 13 4];
+allReg=allReg(order);
 for reg=1:length(regions)
     regInd(reg,1)=find(ismember(allReg,regions(reg)));
 end
+
 
 %fit all together, allowing random effect of session to have more power
 catcolors={[0 0.4 0.9],[0.9 0.2 0],[0.6 0 0.6]};
 titles={'cues','licks','both'};
 cats=[1 3 2];
+pVals=NaN(36,length(cats));
 for ct=1:3
     %region
     barData=zeros(2,5);
@@ -1477,9 +1484,40 @@ for ct=1:3
         barData(1,reg)=sum(sel&regsel)/sum(regsel);      
     end
     tbl = table(categorical(neuronSession(regionnumber>0)), categorical(regionnumber(regionnumber>0)), sel(regionnumber>0), 'VariableNames', {'session', 'region','val'});
-    lm = fitglme(tbl,'val~1+region+(1|session)','distribution','binomial');
+    lm = fitglme(tbl,'val~1+region+(1|session)','distribution','binomial','dummyvarcoding','reference');
     [ypred,ypredCI]=predict(lm,'conditional',false);
     
+    Hall=[];
+%     Htemp = [1 0 0 0 0 0 0 0 0 0 0 0 0;0 0 0 0 0 0 0 0 0 0 0 0 0];
+%     for reg1 = 1:length(regions)
+%         H=Htemp;
+%         H(2,reg1+4)=1;
+%         Hall=cat(1,Hall,H);        
+%     end   
+    Htemp = [0 0 0 0 0 0 0 0 0 0 0 0 0];
+    for reg1 = 1:length(regions)-1
+        for reg2 = reg1+1:length(regions)
+            H=Htemp;
+            H(reg1+4)=1;
+            H(reg2+4)=-1;
+            Hall=cat(1,Hall,H);
+        end
+    end
+    greater=zeros(length(regions));
+    for reg1 = 1:length(regions)
+        for reg2 = 1:length(regions)
+            H=Htemp;
+            H(reg1+4)=1;
+            H(reg2+4)=-1;
+            greater(reg1,reg2)=coefTest(lm,H);
+        end
+    end    
+    
+    %Hall=unique(Hall,'rows');
+    
+    for p=1:length(pVals)
+        pVals(p,ct) = coefTest(lm,Hall(p,:));
+    end    
     barData=barData(:,regInd);
     b=bar(barData','stacked');
     %b(3).FaceColor=[0.4 0 0.5]; %odor
@@ -1517,16 +1555,17 @@ for ct=1:3
     customMap=cat(1,[1 1 1],customMap);
     
     %by region
-    greater=zeros(length(regions));
+    %greater=zeros(length(regions));
     frac=zeros(length(regions));
     for r1=1:length(regions)
         for r2=1:length(regions)
             frac(r1,r2)=barData(1,r1)-barData(1,r2);
-            greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
+            %greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
     s=subplot(4,3,3+ct);
-    imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
+    
+    imagesc(frac .* (greater<pcutoff & frac>0), [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
     cb=colorbar;
@@ -1549,7 +1588,7 @@ for ct=1:3
     sel=ismember(category,cats(ct));
     regionnumber=zeros(totalNeurons,1);
     for reg=1:4
-        regsel=ismember(neuronGroup,reg);
+        regsel=ismember(neuronGroupAdj,reg);
         regionnumber(regsel)=reg;
         barData(1,reg)=sum(sel&regsel)/sum(regsel);      
     end
@@ -1569,7 +1608,7 @@ for ct=1:3
     lowerCI=[];
     estmean=[];
     for reg=1:length(reggrps)
-        regsel=find(ismember(neuronGroup,reggrps(reg)),1);
+        regsel=find(ismember(neuronGroupAdj,reggrps(reg)),1);
         estmean(1,reg)=ypred(regsel);
         upperCI(1,reg)=ypredCI(regsel,2);
         lowerCI(1,reg)=ypredCI(regsel,1);
@@ -1580,11 +1619,21 @@ for ct=1:3
     xlim([0.5 7+0.5]);
     %legend('Cues','Cues,Licks','Licks','Licks,Reward','Reward','Cues,Reward','Cues,Licks,Reward');
     xticks(1:length(reggrps));
-    xticklabels(regionGroupNames(reggrps));
+    xticklabels(regionGroupNames(reggrps-1));
     xtickangle(45);
     ylim([0 0.5]);
     
-    
+     Htemp = [0 0 0 0];
+    greater=zeros(length(reggrps));
+    for reg1 = 1:length(reggrps)
+        for reg2 = 1:length(reggrps)
+            H=Htemp;
+            H(reg1+1)=1;
+            H(reg2+1)=-1;
+            greater(reg1,reg2)=coefTest(lm,H);
+        end
+    end      
+       
     %make heatmap
     target=catcolors{ct};
     customMap=NaN(100,3);
@@ -1594,25 +1643,25 @@ for ct=1:3
     customMap=cat(1,[1 1 1],customMap);
     
     %by region
-    greater=zeros(3);
+    %greater=zeros(3);
     frac=zeros(3);
     for r1=1:length(reggrps)
         for r2=1:length(reggrps)
             frac(r1,r2)=barData(1,r1)-barData(1,r2);
-            greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
+            %greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
         end        
     end
     s=subplot(4,3,9+ct);
-    imagesc(frac .* greater, [0 ceil(max(frac,[],'all')*20)/20]);
+    imagesc(frac .* (greater<0.05/3 & frac>0), [0 ceil(max(frac,[],'all')*20)/20]);
     
     colormap(s,customMap);
     cb=colorbar;
     set(cb,'ticks',[0:0.1:0.3]);
     xticks(1:length(reggrps));
-    xticklabels(regionGroupNames(reggrps));
+    xticklabels(regionGroupNames(reggrps-1));
     xtickangle(45);
     yticks(1:length(reggrps));
-    yticklabels(regionGroupNames(reggrps));
+    yticklabels(regionGroupNames(reggrps-1));
     title(titles{ct});
     if ct==1
         ylabel('increase in this region...');
@@ -1620,6 +1669,8 @@ for ct=1:3
     end        
     
 end
+
+
 
 %% visualize GLM fitting
 
@@ -2224,7 +2275,207 @@ for ct=1:3
     end        
     
 end
+%% trying different GLM cutoffs
+pcutoff=0.05/36;
+figure;
 
+map=redblue(256);
+
+regions={'ALM','ACA','FRP','PL','ILA','ORB','DP','TTd','AON'};
+neuronRegionOlf=neuronRegionAdj;
+neuronRegionOlf(ismember(neuronRegionAdj,{'EPd','PIR'}))={'OLF'};
+allReg=unique(neuronRegionOlf);
+order=[9 10 5 2 3 1 7 12 8 11 6 13 4];
+allReg=allReg(order);
+for reg=1:length(regions)
+    regInd(reg,1)=find(ismember(allReg,regions(reg)));
+end
+
+
+glmcutoffs = [0.005 0.01;0.01 0.02;0.02 0.03;0.03 0.05;0.05 1];
+sels={};
+for g=1:length(glmcutoffs)
+    cueSel = improvement(:,2)>glmcutoffs(g,1) & varExp(:,1)>glmcutoffs(g,1);
+  
+    subplot(6,5,g);
+    cueSel=cueSel & improvement(:,3)<=glmcutoffs(g,1) & improvement(:,4)<=glmcutoffs(g,1);
+    hold on
+    barData=zeros(2,length(regions));
+    for reg=1:length(regions)
+        regsel=ismember(neuronRegionAdj,regions(reg));
+        barData(1,reg)=sum(cueSel&regsel)/sum(regsel);
+    end
+    
+    b=bar(barData','stacked');
+    b(1).FaceColor=[0 0.4 0.9]; %cue
+    b(2).FaceColor=[0.8 0.8 0.9];
+    
+    xlim([0.5 length(regions)+0.5]);
+    ylim([0 0.55]);
+    xticks(1:length(regions));
+    xticklabels(regions);
+    xtickangle(45);
+    
+    title(sprintf('>%g%% cue variance (%g%%)',100*(glmcutoffs(g)),round(100*sum(cueSel)/length(cueSel),2,'significant')));
+    if g==1 ylabel('fraction of neurons'); end
+    sel=cueSel;
+    
+if sum(sel)>50     
+     
+    regionnumber=zeros(totalNeurons,1);
+    for reg=1:length(allReg)
+        regsel=ismember(neuronRegionOlf,allReg(reg));
+        regionnumber(regsel)=reg;
+    end
+    tbl = table(categorical(neuronSession(regionnumber>0)), categorical(regionnumber(regionnumber>0)), sel(regionnumber>0), 'VariableNames', {'session', 'region','val'});
+    lm = fitglme(tbl,'val~1+region+(1|session)','distribution','binomial','dummyvarcoding','reference');
+    [ypred,ypredCI]=predict(lm,'conditional',false);
+
+    greater=zeros(length(regions));
+    for reg1 = 1:length(regions)
+        for reg2 = 1:length(regions)
+            H=Htemp;
+            H(reg1+4)=1;
+            H(reg2+4)=-1;
+            greater(reg1,reg2)=coefTest(lm,H);
+        end
+    end     
+    
+    upperCI=[];
+    lowerCI=[];
+    estmean=[];
+    for reg=1:length(regions)
+        regsel=find(ismember(neuronRegionOlf,regions(reg)),1);
+        estmean(1,reg)=ypred(regsel);
+        upperCI(1,reg)=ypredCI(regsel,2);
+        lowerCI(1,reg)=ypredCI(regsel,1);
+    end
+    
+    errorbar(1:length(regions),estmean(1,:),estmean(1,:)-lowerCI(1,:),upperCI(1,:)-estmean(1,:),'o','linewidth',0.75,'color','k');
+    
+    %make heatmap
+    target=[0 0.4 0.9];
+    customMap=NaN(100,3);
+    for i=1:length(customMap)
+        customMap(i,:)=target*i/(length(customMap));
+    end
+    customMap=cat(1,[1 1 1],customMap);
+    
+    %by region
+    %greater=zeros(length(regions));
+    frac=zeros(length(regions));
+    for r1=1:length(regions)
+        for r2=1:length(regions)
+            frac(r1,r2)=barData(1,r1)-barData(1,r2);
+            %greater(r1,r2)=lowerCI(1,r1)>upperCI(1,r2);
+        end
+    end
+    s=subplot(6,5,5+g);
+    imagesc(frac .* (greater<pcutoff & frac>0), [0 ceil(max(frac,[],'all')*20)/20]);
+    
+    colormap(s,customMap);
+    cb=colorbar;
+    set(cb,'ticks',[0:0.1:0.3]);
+    xticks(1:length(regions));
+    xticklabels(regions);
+    xtickangle(45);
+    yticks(1:length(regions));
+    yticklabels(regions);
+    if g==1
+        ylabel('increase in this region...');
+        xlabel('over this region');
+    end
+    
+    %plot heatmaps of cue neurons in each group
+    
+end
+
+sels{g} = sel;
+end
+
+
+%heatmaps
+cspActivity=dffPSTH3{1,1}; %get the firing rates of neurons of interest
+cueWindow=[0 1.5];
+cueBins=binTimes>=cueWindow(1) & binTimes<=cueWindow(2);
+
+
+colors{1,1}=[0.1 0.6 0.2];
+colors{2,1}=[0.4 0.1 0.4];
+colors{3,1}=[0.3 0.3 0.3];
+regcolors={};
+regcolors{1,1}=[0 0.1 0.4];
+regcolors{2,1}=[0 0.4 0.9];
+regcolors{3,1}=[0.5 0.5 1];
+
+plotWindow=[-0.5 6];
+plotBins=binTimes>=plotWindow(1) & binTimes<=plotWindow(2);
+titles={'CS+       ','CS50      ','CS-     '};
+sets={'set1','set2'};
+
+%plot only in 2%
+sel=sels{3}&~sels{5};
+cueResp=mean(cspActivity(sel,cueBins),2);
+[~,sortOrder]=sort(cueResp);
+
+pn=0;
+for cue=1:3
+    for os=1:length(sets)
+        sn=sets{os};
+        
+        activity = dffPSTH3{cue,os}(sel,:);
+        activity=activity(sortOrder,:);
+        pn=pn+1;
+        s=subplot(2,12,12+pn);
+        hold on;
+        
+        imagesc(binTimes(plotBins),[1 sum(sel)],activity(:,plotBins),[-2 2]);%[min(min(cspActivity)) max(max(cspActivity))]);
+        ylim([0.5 sum(sel)+0.5])
+        plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
+        plot([2.5 2.5],[0.5 sum(sel)+0.5],':','color','k','linewidth',0.25);
+        set(gca,'ytick',[]);
+        
+        %colorbar;
+        title(titles{cue});
+        if pn==1
+            xlabel('seconds from odor onset');
+            ylabel(sprintf('cue neurons in 2%% but not 5%% (%g)',sum(sel)));
+        end        
+        colormap(s,map);
+    end
+end
+
+%plot in both 2% and 5%
+sel=sels{3}&sels{5};
+cueResp=mean(cspActivity(sel,cueBins),2);
+[~,sortOrder]=sort(cueResp);
+
+pn=0;
+for cue=1:3
+    for os=1:length(sets)
+        sn=sets{os};
+        
+        activity = dffPSTH3{cue,os}(sel,:);
+        activity=activity(sortOrder,:);
+        pn=pn+1;
+        s=subplot(2,12,18+pn);
+        hold on;
+        
+        imagesc(binTimes(plotBins),[1 sum(sel)],activity(:,plotBins),[-2 2]);%[min(min(cspActivity)) max(max(cspActivity))]);
+        ylim([0.5 sum(sel)+0.5])
+        plot([0 0],[0.5 sum(sel)+0.5],'color',colors{cue},'linewidth',0.75);
+        plot([2.5 2.5],[0.5 sum(sel)+0.5],':','color','k','linewidth',0.25);
+        set(gca,'ytick',[]);
+        
+        %colorbar;
+        title(titles{cue});
+        if pn==1
+            xlabel('seconds from odor onset');
+            ylabel(sprintf('cue neurons in both (%g)',sum(sel)));
+        end        
+        colormap(s,map);
+    end
+end
 %% 
 function A = makeA(discreteUnfixed,continuousPredictorValues)
 
